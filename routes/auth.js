@@ -155,12 +155,12 @@ router.post("/login", async (req, res) => {
 
 
 
-// Get all students who are not in any group
+// Get all students (only unassigned to groups)
 router.get("/students", async (req, res) => {
   try {
-    const students = await User.find({ role: "student", groupId: null }) // exclude assigned
-      .select("_id name schoolId")
-      .populate("schoolId", "name"); // get school name
+    const students = await User.find({ role: "student", groupId: null })
+      .select("_id name email schoolId") 
+      .populate("schoolId", "name"); 
 
     res.json(students);
   } catch (err) {
