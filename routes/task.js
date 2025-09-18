@@ -80,7 +80,7 @@ router.get("/submission/:taskId", async (req, res) => {
 // Get all tasks for a group
 router.get("/group/:groupId", async (req, res) => {
   try {
-    const tasks = await Task.find({ groupId: req.params.groupId }).sort({ deadline: 1 });
+    const tasks = await Task.find({ groups: req.params.groupId }).sort({ deadline: 1 });
     res.json(tasks);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching tasks", error: err.message });
