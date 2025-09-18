@@ -1,7 +1,7 @@
 // routes/video.js
 const express = require("express");
 const Video = require("../models/Video");
-const videoUpload = require("../middleware/videoUpload");
+const videoUpload = require("../middleware/upload");
 const router = express.Router();
 
 // Upload Video

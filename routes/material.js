@@ -1,7 +1,7 @@
 // routes/material.js
 const express = require("express");
 const Material = require("../models/Material");
-const materialUpload = require("../middleware/pdfUpload"); // multer config
+const materialUpload = require("../middleware/upload"); // multer config
 const router = express.Router();
 const fs = require("fs");
 const path = require("path");
