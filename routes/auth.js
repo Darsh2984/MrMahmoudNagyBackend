@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const Group = require("../models/Group"); 
+const School = require("../models/School")
 const transporter = require("../config/nodemailer");
 
 
@@ -20,7 +21,8 @@ router.post("/register", async (req, res) => {
       studentPhone, 
       parentName, 
       parentPhone, 
-      parentEmail 
+      parentEmail,
+      schoolId,
     } = req.body;
 
     // normalize email
@@ -67,7 +69,9 @@ router.post("/register", async (req, res) => {
       studentPhone: role === "student" ? studentPhone : undefined,
       parentName: role === "student" ? parentName : undefined,
       parentPhone: role === "student" ? parentPhone : undefined,
-      parentId: parentAccount ? parentAccount._id : undefined
+      parentId: parentAccount ? parentAccount._id : undefined,
+      schoolId: role === "student" ? schoolId : null,  
+
     });
 
     await user.save();

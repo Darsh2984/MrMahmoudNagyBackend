@@ -14,6 +14,7 @@ const quizStudentRoutes = require("./routes/quizStudent");
 const quizRoutes = require("./routes/quiz");
 const videoRoutes = require("./routes/video");
 const materialRoutes = require("./routes/material");
+const schoolRoutes = require("./routes/school");
 
 
 
@@ -41,6 +42,8 @@ app.use("/api/quiz-student", quizStudentRoutes); // student routes
 app.use("/api/performance", require("./routes/performance"));
 app.use("/api/video", videoRoutes);
 app.use("/api/material", materialRoutes);
+app.use("/api/school",schoolRoutes );
+
 
 
 

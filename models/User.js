@@ -15,6 +15,8 @@ const userSchema = new mongoose.Schema(
     parentId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     groupId: { type: mongoose.Schema.Types.ObjectId, ref: "Group", default: null },
     yearId: { type: mongoose.Schema.Types.ObjectId, ref: "Year", default: null },
+    schoolId: { type: mongoose.Schema.Types.ObjectId, ref: "School", default: null },
+
 
     // 🔹 Parent extras
     children: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
