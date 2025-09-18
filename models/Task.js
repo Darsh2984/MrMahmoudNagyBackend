@@ -1,0 +1,13 @@
+const mongoose = require("mongoose");
+
+const taskSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String },
+  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  yearId: { type: mongoose.Schema.Types.ObjectId, ref: "Year", required: true },
+  groups: [{ type: mongoose.Schema.Types.ObjectId, ref: "Group", required: true }], // ✅ array of groups
+  deadline: { type: Date, required: true },
+  gradeOutOf: { type: Number, required: true },
+});
+
+module.exports = mongoose.model("Task", taskSchema);
