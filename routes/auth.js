@@ -155,10 +155,13 @@ router.post("/login", async (req, res) => {
 
 
 
-// Get all students
+// Get all students who are not in any group
 router.get("/students", async (req, res) => {
   try {
-    const students = await User.find({ role: "student" }).select("_id name email");
+    const students = await User.find({ role: "student", groupId: null }) // exclude assigned
+      .select("_id name schoolId")
+      .populate("schoolId", "name"); // get school name
+
     res.json(students);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching students", error: err.message });

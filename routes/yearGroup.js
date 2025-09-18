@@ -58,38 +58,56 @@ router.get("/group/:yearId", async (req, res) => {
   }
 });
 
-// Add Student to Group
+// Add multiple students to a group
 router.post("/group/:groupId/add-student", async (req, res) => {
   try {
-    const { studentId } = req.body;
+    const { studentIds } = req.body; // ✅ expects an array of student IDs
     const group = await Group.findById(req.params.groupId).populate("yearId");
 
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
 
-    // ✅ Check if student already exists in ANY group
-    const existingGroup = await Group.findOne({ students: studentId });
-    if (existingGroup) {
-      return res
-        .status(400)
-        .json({ msg: "❌ Student already exists in another group" });
+    if (!Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({ msg: "❌ No students provided" });
     }
 
-    // 1️⃣ Add student to group
-    group.students.push(studentId);
+    let addedStudents = [];
+    let skippedStudents = [];
+
+    for (const studentId of studentIds) {
+      // ✅ Check if student already belongs to another group
+      const existingGroup = await Group.findOne({ students: studentId });
+      if (existingGroup) {
+        skippedStudents.push(studentId);
+        continue;
+      }
+
+      // 1️⃣ Add student to group
+      group.students.push(studentId);
+
+      // 2️⃣ Update student with groupId + yearId
+      await User.findByIdAndUpdate(studentId, {
+        groupId: group._id,
+        yearId: group.yearId,
+      });
+
+      addedStudents.push(studentId);
+    }
+
     await group.save();
 
-    // 2️⃣ Update student document with groupId + yearId
-    await User.findByIdAndUpdate(studentId, {
+    res.json({
+      msg: "✅ Students processed",
       groupId: group._id,
       yearId: group.yearId,
+      addedStudents,
+      skippedStudents, // helpful for frontend feedback
     });
-
-    res.json({ msg: "✅ Student added to group", groupId: group._id, yearId: group.yearId });
   } catch (err) {
-    console.error("❌ Error adding student:", err);
-    res.status(500).json({ msg: "❌ Error adding student", error: err.message });
+    console.error("❌ Error adding students:", err);
+    res.status(500).json({ msg: "❌ Error adding students", error: err.message });
   }
 });
+
 
 
 // Remove student from group
