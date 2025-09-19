@@ -6,7 +6,6 @@ const Chapter = require("../models/Chapter");
 // ----------------- UNITS -----------------
 
 // Create Unit
-// Create Unit
 router.post("/unit", async (req, res) => {
   const { name, teacherId, yearId } = req.body;
   if (!name || !teacherId || !yearId) {
@@ -19,20 +18,36 @@ router.post("/unit", async (req, res) => {
 
 // Get Units for a Teacher + Year
 router.get("/unit/:teacherId/:yearId", async (req, res) => {
-  const { teacherId, yearId } = req.params;
-  const units = await Unit.find({ teacherId, yearId }).populate("chapters");
-  res.json(units);
-});
-
-
-// Get Units (with chapters)
-router.get("/unit/:teacherId", async (req, res) => {
   try {
-    const units = await Unit.find({ teacherId: req.params.teacherId })
-      .populate("chapters");
+    const { teacherId, yearId } = req.params;
+    const units = await Unit.find({ teacherId, yearId }).populate("chapters");
     res.json(units);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching units", error: err.message });
+  }
+});
+
+// Get Units for a Teacher (all years)
+router.get("/unit/:teacherId", async (req, res) => {
+  try {
+    const units = await Unit.find({ teacherId: req.params.teacherId }).populate("chapters");
+    res.json(units);
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error fetching units", error: err.message });
+  }
+});
+
+// ✅ NEW: Get Units for a Student by Year
+router.get("/unit/student/:studentId/year/:yearId/units", async (req, res) => {
+  try {
+    const { yearId } = req.params;
+
+    // Return only units of this year (no need for teacherId on student side)
+    const units = await Unit.find({ yearId }).populate("chapters");
+    res.json(units);
+  } catch (err) {
+    console.error("❌ Error fetching student units:", err.message);
+    res.status(500).json({ msg: "❌ Error fetching student units", error: err.message });
   }
 });
 

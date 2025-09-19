@@ -1,11 +1,12 @@
 const express = require("express");
 const Material = require("../models/Material");
-const { materialUpload } = require("../middleware/upload"); // ✅ fixed
+const Student = require("../models/User"); // ✅ needed for filtering
+const { materialUpload } = require("../middleware/upload");
 const router = express.Router();
 const fs = require("fs");
 const path = require("path");
 
-// Upload PDF
+// ----------------- Upload PDF -----------------
 router.post("/", materialUpload.single("file"), async (req, res) => {
   try {
     const { title, yearId, unitId, chapterId, teacherId } = req.body;
@@ -28,7 +29,7 @@ router.post("/", materialUpload.single("file"), async (req, res) => {
   }
 });
 
-// List PDFs by Year
+// ----------------- Teacher: List PDFs by Year -----------------
 router.get("/year/:yearId", async (req, res) => {
   try {
     const materials = await Material.find({ yearId: req.params.yearId })
@@ -43,18 +44,26 @@ router.get("/year/:yearId", async (req, res) => {
   }
 });
 
-// routes/unit.js
-router.get("/unit/:teacherId/:yearId", async (req, res) => {
+// ----------------- Student: List PDFs by Year -----------------
+router.get("/student/:studentId/year/:yearId", async (req, res) => {
   try {
-    const { teacherId, yearId } = req.params;
-    const units = await Unit.find({ teacherId, yearId }).populate("chapters");
-    res.json(units);
+    const { yearId } = req.params;
+
+    // ✅ Fetch only materials of that year
+    const materials = await Material.find({ yearId })
+      .populate("unitId", "name")
+      .populate("chapterId", "name")
+      .populate("teacherId", "name email")
+      .sort({ createdAt: -1 });
+
+    res.json(materials);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error fetching units", error: err.message });
+    res.status(500).json({ msg: "❌ Error fetching student materials", error: err.message });
   }
 });
 
-// Stream PDF (no direct download)
+
+// ----------------- Stream PDF -----------------
 router.get("/stream/:id", async (req, res) => {
   try {
     const material = await Material.findById(req.params.id);
@@ -78,7 +87,7 @@ router.get("/stream/:id", async (req, res) => {
   }
 });
 
-// Delete PDF
+// ----------------- Delete PDF -----------------
 router.delete("/:id", async (req, res) => {
   try {
     const material = await Material.findById(req.params.id);
