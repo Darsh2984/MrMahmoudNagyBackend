@@ -5,7 +5,9 @@ const questionSchema = new mongoose.Schema({
   correctAnswer: { type: String, required: true }, // "A" | "B" | "C" | "D"
   unitId: { type: mongoose.Schema.Types.ObjectId, ref: "Unit", required: true },
   chapterId: { type: mongoose.Schema.Types.ObjectId, ref: "Chapter", required: true },
-  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }
+  teacherId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  yearId: { type: mongoose.Schema.Types.ObjectId, ref: "Year" },
+
 }, { timestamps: true });
 
 module.exports = mongoose.model("Question", questionSchema);

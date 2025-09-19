@@ -13,18 +13,16 @@ const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your storage ho
 // ---------------- CREATE QUESTION ----------------
 router.post("/question", questionUpload.single("image"), async (req, res) => {
   try {
-    const { correctAnswer, unitId, chapterId, teacherId } = req.body;
+    const { correctAnswer, unitId, chapterId, teacherId, yearId } = req.body;
 
-    if (!req.file || !correctAnswer || !unitId || !chapterId || !teacherId) {
+    if (!req.file || !correctAnswer || !unitId || !chapterId || !teacherId || !yearId) {
       return res.status(400).json({ msg: "❌ Missing required fields" });
     }
 
-    // Build unique file path inside Bunny
     const fileName = Date.now() + "-" + req.file.originalname;
     const path = `questions/${fileName}`;
     const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
 
-    // Upload file buffer to Bunny
     await axios.put(uploadUrl, req.file.buffer, {
       headers: {
         AccessKey: BUNNY_ACCESS_KEY,
@@ -33,7 +31,6 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
       maxBodyLength: Infinity,
     });
 
-    // CDN URL (what we save in DB)
     const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
 
     const question = new Question({
@@ -42,6 +39,7 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
       unitId,
       chapterId,
       teacherId,
+      yearId, // ✅ save yearId
     });
 
     await question.save();
@@ -56,9 +54,23 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
 router.get("/questions/:teacherId", async (req, res) => {
   try {
     const questions = await Question.find({ teacherId: req.params.teacherId })
+      .populate("yearId", "name")
       .populate("unitId", "name")
       .populate("chapterId", "name");
 
+    res.json(questions);
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error fetching questions", error: err.message });
+  }
+});
+
+// routes/question.js
+router.get("/questions/:teacherId/:yearId", async (req, res) => {
+  try {
+    const { teacherId, yearId } = req.params;
+    const questions = await Question.find({ teacherId, yearId })
+      .populate("unitId", "name")
+      .populate("chapterId", "name");
     res.json(questions);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching questions", error: err.message });
