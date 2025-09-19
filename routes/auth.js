@@ -222,7 +222,7 @@ router.post("/forgot-password", async (req, res) => {
     await user.save();
 
     // send email
-    const resetURL = `${process.env.FRONTEND_URL}/reset-password/${token}`;
+    const resetURL = `${process.env.FRONTEND_URL}reset-password/${token}`;
     await transporter.sendMail({
       to: user.email,
       from: process.env.EMAIL_USER,
