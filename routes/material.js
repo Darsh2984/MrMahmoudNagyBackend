@@ -1,21 +1,43 @@
 const express = require("express");
 const Material = require("../models/Material");
-const Student = require("../models/User"); // ✅ needed for filtering
+const Student = require("../models/User");
 const { materialUpload } = require("../middleware/upload");
+const axios = require("axios");
+
 const router = express.Router();
-const fs = require("fs");
-const path = require("path");
+
+// ----------------- Bunny Config -----------------
+const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE; // e.g. "studentfiles"
+const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;     // from Bunny dashboard
+const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your hostname
 
 // ----------------- Upload PDF -----------------
 router.post("/", materialUpload.single("file"), async (req, res) => {
   try {
     const { title, yearId, unitId, chapterId, teacherId } = req.body;
-
     if (!req.file) return res.status(400).json({ msg: "❌ PDF file required" });
 
+    // Unique file path inside Bunny
+    const fileName = Date.now() + "-" + req.file.originalname;
+    const path = `materials/${fileName}`;
+    const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
+
+    // Upload file buffer to Bunny
+    await axios.put(uploadUrl, req.file.buffer, {
+      headers: {
+        AccessKey: BUNNY_ACCESS_KEY,
+        "Content-Type": "application/octet-stream",
+      },
+      maxBodyLength: Infinity,
+    });
+
+    // Public CDN URL (what students/teachers use)
+    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+
+    // Save in DB
     const material = new Material({
       title,
-      fileUrl: `/uploads/materials/${req.file.filename}`,
+      fileUrl: cdnUrl,
       yearId,
       unitId,
       chapterId,
@@ -25,6 +47,7 @@ router.post("/", materialUpload.single("file"), async (req, res) => {
     await material.save();
     res.json(material);
   } catch (err) {
+    console.error("❌ Error uploading material:", err.message);
     res.status(500).json({ msg: "❌ Error uploading material", error: err.message });
   }
 });
@@ -48,8 +71,6 @@ router.get("/year/:yearId", async (req, res) => {
 router.get("/student/:studentId/year/:yearId", async (req, res) => {
   try {
     const { yearId } = req.params;
-
-    // ✅ Fetch only materials of that year
     const materials = await Material.find({ yearId })
       .populate("unitId", "name")
       .populate("chapterId", "name")
@@ -62,48 +83,26 @@ router.get("/student/:studentId/year/:yearId", async (req, res) => {
   }
 });
 
-
-// ----------------- Stream PDF -----------------
-router.get("/stream/:id", async (req, res) => {
-  try {
-    const material = await Material.findById(req.params.id);
-    if (!material) return res.status(404).json({ msg: "Material not found" });
-
-    const filePath = path.join(__dirname, `..${material.fileUrl}`);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ msg: "File not found on server" });
-    }
-
-    const stat = fs.statSync(filePath);
-    res.writeHead(200, {
-      "Content-Type": "application/pdf",
-      "Content-Length": stat.size,
-      "Content-Disposition": "inline", // ✅ inline view, no download
-    });
-
-    fs.createReadStream(filePath).pipe(res);
-  } catch (err) {
-    res.status(500).json({ msg: "❌ Error streaming PDF", error: err.message });
-  }
-});
-
 // ----------------- Delete PDF -----------------
 router.delete("/:id", async (req, res) => {
   try {
     const material = await Material.findById(req.params.id);
     if (!material) return res.status(404).json({ msg: "Material not found" });
 
-    // delete from DB
-    await Material.findByIdAndDelete(req.params.id);
+    // Remove from Bunny
+    const path = material.fileUrl.split(".b-cdn.net/")[1]; // e.g. "materials/filename.pdf"
+    const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
 
-    // delete file from disk
-    const filePath = path.join(__dirname, `..${material.fileUrl}`);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    await axios.delete(deleteUrl, {
+      headers: { AccessKey: BUNNY_ACCESS_KEY },
+    });
+
+    // Remove from DB
+    await Material.findByIdAndDelete(req.params.id);
 
     res.json({ msg: "✅ Material deleted" });
   } catch (err) {
+    console.error("❌ Error deleting material:", err.message);
     res.status(500).json({ msg: "❌ Error deleting material", error: err.message });
   }
 });
