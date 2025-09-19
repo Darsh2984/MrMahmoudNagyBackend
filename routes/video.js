@@ -1,8 +1,9 @@
-// routes/video.js
 const express = require("express");
 const Video = require("../models/Video");
-const videoUpload = require("../middleware/upload");
+const { videoUpload } = require("../middleware/upload"); // ✅ fixed
 const router = express.Router();
+const fs = require("fs");
+const path = require("path");
 
 // Upload Video
 router.post("/", videoUpload.single("video"), async (req, res) => {
@@ -17,7 +18,7 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
       yearId,
       unitId,
       chapterId,
-      teacherId
+      teacherId,
     });
 
     await video.save();
@@ -45,22 +46,36 @@ router.get("/year/:yearId", async (req, res) => {
 // Delete Video
 router.delete("/:id", async (req, res) => {
   try {
+    const video = await Video.findById(req.params.id);
+    if (!video) return res.status(404).json({ msg: "Video not found" });
+
+    // remove from DB
     await Video.findByIdAndDelete(req.params.id);
+
+    // remove file from disk
+    const filePath = path.join(__dirname, `..${video.videoUrl}`);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
     res.json({ msg: "✅ Video deleted" });
   } catch (err) {
     res.status(500).json({ msg: "❌ Error deleting video", error: err.message });
   }
 });
 
-// Stream video (no direct download)
+// Stream video (supports range requests)
 router.get("/stream/:id", async (req, res) => {
   try {
     const video = await Video.findById(req.params.id);
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
-    const path = `.${video.videoUrl}`; // full path to file
-    const fs = require("fs");
-    const stat = fs.statSync(path);
+    const filePath = path.join(__dirname, `..${video.videoUrl}`);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ msg: "File not found on server" });
+    }
+
+    const stat = fs.statSync(filePath);
     const fileSize = stat.size;
     const range = req.headers.range;
 
@@ -69,7 +84,7 @@ router.get("/stream/:id", async (req, res) => {
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunksize = end - start + 1;
-      const file = fs.createReadStream(path, { start, end });
+      const file = fs.createReadStream(filePath, { start, end });
       const head = {
         "Content-Range": `bytes ${start}-${end}/${fileSize}`,
         "Accept-Ranges": "bytes",
@@ -84,13 +99,12 @@ router.get("/stream/:id", async (req, res) => {
         "Content-Type": "video/mp4",
       };
       res.writeHead(200, head);
-      fs.createReadStream(path).pipe(res);
+      fs.createReadStream(filePath).pipe(res);
     }
   } catch (err) {
     console.error("❌ Streaming error:", err.message);
     res.status(500).json({ msg: "❌ Error streaming video", error: err.message });
   }
 });
-
 
 module.exports = router;

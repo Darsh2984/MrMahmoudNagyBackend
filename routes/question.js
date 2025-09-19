@@ -2,9 +2,10 @@ const express = require("express");
 const router = express.Router();
 const Question = require("../models/Question");
 const upload = require("../middleware/upload");
+const { questionUpload } = require("../middleware/upload");
 
 // ---------------- CREATE QUESTION ----------------
-router.post("/question", upload.single("image"), async (req, res) => {
+router.post("/question", questionUpload.single("image"), async (req, res) => {
   try {
     const { correctAnswer, unitId, chapterId, teacherId } = req.body;
 

@@ -6,18 +6,24 @@ const Chapter = require("../models/Chapter");
 // ----------------- UNITS -----------------
 
 // Create Unit
+// Create Unit
 router.post("/unit", async (req, res) => {
-  try {
-    const { name, teacherId } = req.body;
-    if (!name || !teacherId) return res.status(400).json({ msg: "Name and Teacher ID are required" });
-
-    const unit = new Unit({ name, teacherId });
-    await unit.save();
-    res.json(unit);
-  } catch (err) {
-    res.status(500).json({ msg: "❌ Error creating unit", error: err.message });
+  const { name, teacherId, yearId } = req.body;
+  if (!name || !teacherId || !yearId) {
+    return res.status(400).json({ msg: "Name, Teacher ID and Year ID are required" });
   }
+  const unit = new Unit({ name, teacherId, yearId });
+  await unit.save();
+  res.json(unit);
 });
+
+// Get Units for a Teacher + Year
+router.get("/unit/:teacherId/:yearId", async (req, res) => {
+  const { teacherId, yearId } = req.params;
+  const units = await Unit.find({ teacherId, yearId }).populate("chapters");
+  res.json(units);
+});
+
 
 // Get Units (with chapters)
 router.get("/unit/:teacherId", async (req, res) => {
