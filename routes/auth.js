@@ -120,7 +120,7 @@ router.post("/login", async (req, res) => {
 
     // after successful login
     if (user.role === "student") {
-      if (!user.parentName || !user.parentEmail || !user.parentPhone) {
+      if (!user.parentId) {
         return res.status(403).json({
           msg: "Parent details required",
           parentDetailsRequired: true,
