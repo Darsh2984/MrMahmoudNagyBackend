@@ -37,28 +37,24 @@ router.post("/register", async (req, res) => {
     let parentAccount = null;
 
     // ✅ If registering a student → handle parent
-    if (role === "student") {
-      if (!parentEmail) {
-        return res.status(400).json({ msg: "❌ Parent email is required for students" });
-      }
+    if (role === "student" && parentEmail) {
+    parentEmail = parentEmail.toLowerCase();
 
-      parentEmail = parentEmail.toLowerCase();
+    parentAccount = await User.findOne({ email: parentEmail, role: "parent" });
 
-      parentAccount = await User.findOne({ email: parentEmail, role: "parent" });
-
-      // 👇 If parent doesn’t exist → auto-create without password
-      if (!parentAccount) {
-        parentAccount = new User({
-          name: parentName,
-          email: parentEmail,
-          role: "parent",
-          parentPhone,
-          password: null,         // no password yet
-          needsActivation: true   // must set password later
-        });
-        await parentAccount.save();
-      }
+    // 👇 If parent doesn’t exist → auto-create without password
+    if (!parentAccount) {
+      parentAccount = new User({
+        name: parentName,
+        email: parentEmail,
+        role: "parent",
+        parentPhone,
+        password: null,
+        needsActivation: true
+      });
+      await parentAccount.save();
     }
+  }
 
     // ✅ Create the new user (student, teacher, or parent)
     const user = new User({
@@ -122,6 +118,18 @@ router.post("/login", async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ msg: "❌ Invalid credentials" });
 
+    // after successful login
+    if (user.role === "student") {
+      if (!user.parentName || !user.parentEmail || !user.parentPhone) {
+        return res.status(403).json({
+          msg: "Parent details required",
+          parentDetailsRequired: true,
+          studentId: user._id,
+        });
+      }
+    }
+
+
     // 🔹 if student, fetch their group
     let group = null;
     if (user.role === "student") {
@@ -153,6 +161,54 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// Update parent details for a student (and create parent account if missing)
+router.post("/student/add-parent", async (req, res) => {
+  try {
+    const { studentId, parentName, parentEmail, parentPhone } = req.body;
+
+    const student = await User.findById(studentId);
+    if (!student || student.role !== "student") {
+      return res.status(404).json({ msg: "Student not found" });
+    }
+
+    // normalize parent email
+    const normalizedParentEmail = parentEmail.toLowerCase();
+
+    // check if parent already exists
+    let parentAccount = await User.findOne({ email: normalizedParentEmail, role: "parent" });
+
+    if (!parentAccount) {
+      // create new parent account with needsActivation = true
+      parentAccount = new User({
+        name: parentName,
+        email: normalizedParentEmail,
+        role: "parent",
+        parentPhone,
+        password: null,          // no password yet
+        needsActivation: true,   // must activate later
+        children: [student._id], // link child
+      });
+      await parentAccount.save();
+    } else {
+      // if parent already exists, just link the child
+      if (!parentAccount.children.includes(student._id)) {
+        parentAccount.children.push(student._id);
+        await parentAccount.save();
+      }
+    }
+
+    // update student with parent reference
+    student.parentName = parentName;
+    student.parentPhone = parentPhone;
+    student.parentId = parentAccount._id;
+    student.save();
+
+    res.json({ msg: "✅ Parent details saved successfully", parent: parentAccount });
+  } catch (err) {
+    console.error("❌ Error saving parent details:", err);
+    res.status(500).json({ msg: "❌ Error saving parent details", error: err.message });
+  }
+});
 
 
 // Get all students (only unassigned to groups)
