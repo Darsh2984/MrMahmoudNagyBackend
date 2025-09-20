@@ -246,6 +246,29 @@ router.get("/parent/:id/students", async (req, res) => {
   }
 });
 
+// ✅ Validate user & refresh group membership
+router.get("/validate/:id", async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    let groupId = null;
+    if (user.role === "student") {
+      const group = await Group.findOne({ students: user._id }).select("_id");
+      groupId = group?._id || null;
+    }
+
+    res.json({
+      id: user._id,
+      role: user.role,
+      groupId,
+    });
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error validating user", error: err.message });
+  }
+});
+
+
 // Set Password first Time Parent Login
 router.post("/parent/set-password", async (req, res) => {
   const { email, newPassword } = req.body;
