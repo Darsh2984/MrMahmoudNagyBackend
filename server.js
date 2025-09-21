@@ -15,6 +15,8 @@ const quizRoutes = require("./routes/quiz");
 const videoRoutes = require("./routes/video");
 const materialRoutes = require("./routes/material");
 const schoolRoutes = require("./routes/school");
+const adminRoutes = require("./routes/admin");
+
 
 
 
@@ -43,6 +45,7 @@ app.use("/api/performance", require("./routes/performance"));
 app.use("/api/video", videoRoutes);
 app.use("/api/material", materialRoutes);
 app.use("/api/school",schoolRoutes );
+app.use("/api/admin", adminRoutes);
 
 
 
