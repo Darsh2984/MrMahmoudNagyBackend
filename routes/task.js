@@ -4,6 +4,8 @@ const router = express.Router();
 const Task = require("../models/Task");
 const Submission = require("../models/Submission");
 const multer = require("multer");
+const User = require("../models/User");
+const transporter = require("../config/nodemailer"); // ✅ already configured
 
 // ----------------- Multer In-Memory -----------------
 const upload = multer({ storage: multer.memoryStorage() });
@@ -23,22 +25,87 @@ router.post("/task", async (req, res) => {
       return res.status(400).json({ msg: "❌ At least one group must be selected" });
     }
 
+    // ✅ Save the task with deadline (date + time)
     const task = new Task({
       title,
       description,
       teacherId,
       yearId,
       groups,
-      deadline,
+      deadline: new Date(deadline), // ensures proper Date object
       gradeOutOf,
     });
 
     await task.save();
-    res.json({ msg: "✅ Task created", task });
+
+    // ✅ Fetch all students in the selected groups
+    const students = await User.find({
+      role: "student",
+      groupId: { $in: groups }
+    }).select("name email parentId");
+
+    // ✅ If parent accounts exist, fetch them too
+    const parents = await User.find({
+      _id: { $in: students.map((s) => s.parentId).filter(Boolean) },
+    }).select("email name");
+
+    // ✅ Send emails to students
+    for (const student of students) {
+      try {
+        await transporter.sendMail({
+          to: student.email,
+          from: process.env.EMAIL_USER,
+          subject: `📝 New Task Assigned: ${title}`,
+          html: `
+            <h3>New Task Assigned</h3>
+            <p>Hello <b>${student.name}</b>,</p>
+            <p>A new task has been created for your group:</p>
+            <ul>
+              <li><b>Title:</b> ${title}</li>
+              <li><b>Description:</b> ${description || "No description"}</li>
+              <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
+              <li><b>Marks:</b> Out of ${gradeOutOf}</li>
+            </ul>
+            <p>Please make sure to submit before the deadline.</p>
+          `,
+        });
+      } catch (mailErr) {
+        console.warn(`⚠️ Failed to send mail to ${student.email}:`, mailErr.message);
+      }
+    }
+
+    // ✅ Optionally send to parents
+    for (const parent of parents) {
+      try {
+        await transporter.sendMail({
+          to: parent.email,
+          from: process.env.EMAIL_USER,
+          subject: `📢 Your Child Has a New Task: ${title}`,
+          html: `
+            <h3>New Task Notification</h3>
+            <p>Hello <b>${parent.name}</b>,</p>
+            <p>A new task has been assigned to your child. Details:</p>
+            <ul>
+              <li><b>Title:</b> ${title}</li>
+              <li><b>Description:</b> ${description || "No description"}</li>
+              <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
+              <li><b>Marks:</b> Out of ${gradeOutOf}</li>
+            </ul>
+            <p>You can follow up with your child to ensure timely submission.</p>
+          `,
+        });
+      } catch (mailErr) {
+        console.warn(`⚠️ Failed to send mail to parent ${parent.email}:`, mailErr.message);
+      }
+    }
+
+    res.json({ msg: "✅ Task created and notifications sent", task });
   } catch (err) {
+    console.error("❌ Error creating task:", err.message);
     res.status(500).json({ msg: "❌ Error creating task", error: err.message });
   }
 });
+
 
 // ----------------- Student Upload Submission -----------------
 router.post("/submission", upload.single("file"), async (req, res) => {
