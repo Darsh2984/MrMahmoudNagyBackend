@@ -52,6 +52,30 @@ router.post("/", materialUpload.single("file"), async (req, res) => {
   }
 });
 
+// ----------------- Add Material by URL -----------------
+router.post("/url", async (req, res) => {
+  try {
+    const { title, fileUrl, yearId, unitId, chapterId, teacherId } = req.body;
+    if (!fileUrl) return res.status(400).json({ msg: "❌ PDF URL required" });
+
+    const material = new Material({
+      title,
+      fileUrl, // ✅ teacher provided Bunny CDN link
+      yearId,
+      unitId,
+      chapterId,
+      teacherId,
+    });
+
+    await material.save();
+    res.json(material);
+  } catch (err) {
+    console.error("❌ Error saving material URL:", err.message);
+    res.status(500).json({ msg: "❌ Error saving material URL", error: err.message });
+  }
+});
+
+
 // ----------------- Teacher: List PDFs by Year -----------------
 router.get("/year/:yearId", async (req, res) => {
   try {
