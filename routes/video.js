@@ -1,5 +1,7 @@
 const express = require("express");
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
 const Video = require("../models/Video");
 const { videoUpload } = require("../middleware/upload");
 
@@ -17,10 +19,13 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
     if (!req.file) return res.status(400).json({ msg: "❌ Video file required" });
 
     const fileName = Date.now() + "-" + req.file.originalname;
-    const path = `videos/${fileName}`;
-    const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
+    const storagePath = `videos/${fileName}`;
+    const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${storagePath}`;
 
-    await axios.put(uploadUrl, req.file.buffer, {
+    // ✅ Stream the video instead of loading it into memory
+    const stream = fs.createReadStream(req.file.path);
+
+    await axios.put(uploadUrl, stream, {
       headers: {
         AccessKey: BUNNY_ACCESS_KEY,
         "Content-Type": "application/octet-stream",
@@ -28,11 +33,16 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
       maxBodyLength: Infinity,
     });
 
-    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+    // ✅ Clean up local file
+    fs.unlink(req.file.path, (err) => {
+      if (err) console.error("⚠️ Failed to remove temp file:", err.message);
+    });
+
+    const cdnUrl = `https://layth-eg.b-cdn.net/${storagePath}`;
 
     const video = new Video({
       title,
-      videoUrl: cdnUrl, // ✅ store Bunny CDN URL
+      videoUrl: cdnUrl, // ✅ Bunny CDN link
       yearId,
       unitId,
       chapterId,
@@ -69,8 +79,9 @@ router.delete("/:id", async (req, res) => {
     if (!video) return res.status(404).json({ msg: "Video not found" });
 
     // Delete from Bunny
-    const path = video.videoUrl.split(".b-cdn.net/")[1]; // "videos/filename.mp4"
-    const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
+    const storagePath = video.videoUrl.split(".b-cdn.net/")[1]; // e.g. "videos/filename.mp4"
+    const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${storagePath}`;
+
     await axios.delete(deleteUrl, {
       headers: { AccessKey: BUNNY_ACCESS_KEY },
     });
