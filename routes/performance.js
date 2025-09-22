@@ -30,8 +30,11 @@ router.get("/:groupId/:studentId", async (req, res) => {
     });
 
     // Tasks
-    const tasks = await Task.find({ groupId });
-    const submissions = await Submission.find({ groupId, studentId });
+    const tasks = await Task.find({ groups: groupId });
+    const submissions = await Submission.find({
+      studentId,
+      taskId: { $in: tasks.map((t) => t._id) },
+    });
     const taskStatus = tasks.map((t) => ({
       _id: t._id,
       title: t.title,
@@ -42,7 +45,7 @@ router.get("/:groupId/:studentId", async (req, res) => {
     const quizzes = await Quiz.find({ groups: groupId }).populate("questions");
     const quizSubmissions = await QuizSubmission.find({
       studentId,
-      quizId: { $in: quizzes.map((q) => q._id) }
+      quizId: { $in: quizzes.map((q) => q._id) },
     }).populate("quizId", "title");
 
     const quizGrades = quizzes.map((q) => {
@@ -51,7 +54,7 @@ router.get("/:groupId/:studentId", async (req, res) => {
       );
       return {
         quizTitle: q.title,
-        score: submission ? submission.score : null,
+        score: submission ? submission.score : null, // adjust field if needed
         total: q.questions.length,
       };
     });
