@@ -106,6 +106,48 @@ router.post("/task", async (req, res) => {
   }
 });
 
+// ----------------- Edit Task -----------------
+router.put("/task/:id", async (req, res) => {
+  try {
+    const { title, description, deadline, gradeOutOf } = req.body;
+
+    const task = await Task.findByIdAndUpdate(
+      req.params.id,
+      {
+        title,
+        description,
+        deadline: new Date(deadline),
+        gradeOutOf,
+      },
+      { new: true }
+    );
+
+    if (!task) return res.status(404).json({ msg: "❌ Task not found" });
+
+    res.json({ msg: "✅ Task updated", task });
+  } catch (err) {
+    console.error("❌ Error updating task:", err.message);
+    res.status(500).json({ msg: "❌ Error updating task", error: err.message });
+  }
+});
+
+// ----------------- Delete Task -----------------
+router.delete("/task/:id", async (req, res) => {
+  try {
+    const task = await Task.findByIdAndDelete(req.params.id);
+    if (!task) return res.status(404).json({ msg: "❌ Task not found" });
+
+    // Optionally: delete related submissions
+    await Submission.deleteMany({ taskId: req.params.id });
+
+    res.json({ msg: "✅ Task deleted" });
+  } catch (err) {
+    console.error("❌ Error deleting task:", err.message);
+    res.status(500).json({ msg: "❌ Error deleting task", error: err.message });
+  }
+});
+
+
 
 // ----------------- Student Upload Submission -----------------
 router.post("/submission", upload.single("file"), async (req, res) => {
