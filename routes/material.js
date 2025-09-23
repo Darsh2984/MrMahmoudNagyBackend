@@ -1,6 +1,6 @@
 const express = require("express");
 const Material = require("../models/Material");
-const Student = require("../models/User");
+const User = require("../models/User");
 const { materialUpload } = require("../middleware/upload");
 const axios = require("axios");
 
@@ -9,13 +9,31 @@ const router = express.Router();
 // ----------------- Bunny Config -----------------
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE; // e.g. "studentfiles"
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;     // from Bunny dashboard
-const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your hostname
+const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your storage hostname
+const BUNNY_CDN_HOST = "https://layth-eg.b-cdn.net"; // your CDN hostname
+
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If this is an assistant, return the main teacher’s ID
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+
+  return user._id; // main teacher
+}
 
 // ----------------- Upload PDF -----------------
 router.post("/", materialUpload.single("file"), async (req, res) => {
   try {
-    const { title, yearId, unitId, chapterId, teacherId } = req.body;
+    let { title, yearId, unitId, chapterId, teacherId } = req.body;
     if (!req.file) return res.status(400).json({ msg: "❌ PDF file required" });
+
+    // Resolve teacher ID (assistant → teacher)
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
     // Unique file path inside Bunny
     const fileName = Date.now() + "-" + req.file.originalname;
@@ -31,8 +49,8 @@ router.post("/", materialUpload.single("file"), async (req, res) => {
       maxBodyLength: Infinity,
     });
 
-    // Public CDN URL (what students/teachers use)
-    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+    // Public CDN URL
+    const cdnUrl = `${BUNNY_CDN_HOST}/${path}`;
 
     // Save in DB
     const material = new Material({
@@ -55,8 +73,11 @@ router.post("/", materialUpload.single("file"), async (req, res) => {
 // ----------------- Add Material by URL -----------------
 router.post("/url", async (req, res) => {
   try {
-    const { title, fileUrl, yearId, unitId, chapterId, teacherId } = req.body;
+    let { title, fileUrl, yearId, unitId, chapterId, teacherId } = req.body;
     if (!fileUrl) return res.status(400).json({ msg: "❌ PDF URL required" });
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
     const material = new Material({
       title,
@@ -75,11 +96,15 @@ router.post("/url", async (req, res) => {
   }
 });
 
-
 // ----------------- Teacher: List PDFs by Year -----------------
-router.get("/year/:yearId", async (req, res) => {
+router.get("/year/:yearId/teacher/:teacherId", async (req, res) => {
   try {
-    const materials = await Material.find({ yearId: req.params.yearId })
+    let { teacherId, yearId } = req.params;
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
+
+    const materials = await Material.find({ yearId, teacherId })
       .populate("unitId", "name")
       .populate("chapterId", "name")
       .populate("teacherId", "name email")
@@ -95,6 +120,7 @@ router.get("/year/:yearId", async (req, res) => {
 router.get("/student/:studentId/year/:yearId", async (req, res) => {
   try {
     const { yearId } = req.params;
+
     const materials = await Material.find({ yearId })
       .populate("unitId", "name")
       .populate("chapterId", "name")
@@ -108,10 +134,20 @@ router.get("/student/:studentId/year/:yearId", async (req, res) => {
 });
 
 // ----------------- Delete PDF -----------------
-router.delete("/:id", async (req, res) => {
+router.delete("/:id/teacher/:teacherId", async (req, res) => {
   try {
-    const material = await Material.findById(req.params.id);
-    if (!material) return res.status(404).json({ msg: "Material not found" });
+    let { id, teacherId } = req.params;
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
+
+    const material = await Material.findById(id);
+    if (!material) return res.status(404).json({ msg: "❌ Material not found" });
+
+    // Ensure material belongs to this teacher
+    if (material.teacherId.toString() !== teacherId.toString()) {
+      return res.status(403).json({ msg: "❌ Not authorized to delete this material" });
+    }
 
     // Remove from Bunny
     const path = material.fileUrl.split(".b-cdn.net/")[1]; // e.g. "materials/filename.pdf"
@@ -122,7 +158,7 @@ router.delete("/:id", async (req, res) => {
     });
 
     // Remove from DB
-    await Material.findByIdAndDelete(req.params.id);
+    await Material.findByIdAndDelete(id);
 
     res.json({ msg: "✅ Material deleted" });
   } catch (err) {

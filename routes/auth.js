@@ -141,6 +141,12 @@ router.post("/login", async (req, res) => {
       group = await Group.findOne({ students: user._id }).select("_id name yearId");
     }
 
+    // if assistant, map them to teacher
+    let realTeacherId = user._id;
+    if (user.assistantOf) {
+      realTeacherId = user.assistantOf; // ✅ use teacher's ID
+    }
+
     // create JWT token
     const token = jwt.sign(
       { id: user._id, role: user.role },
@@ -156,8 +162,10 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        assistantOf: user.assistantOf || null,
         groupId: group?._id || null,
         groupName: group?.name || null,
+        realTeacherId,
       },
     });
   } catch (err) {
