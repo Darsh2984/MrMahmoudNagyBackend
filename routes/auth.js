@@ -115,6 +115,11 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ msg: "❌ No password set. Please activate your account." });
     }
 
+    console.log("🔎 Login attempt:", {
+      email: user.email,
+      typedPassword: password,
+      storedHash: user.password,
+    });
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ msg: "❌ Invalid credentials" });
 
@@ -160,6 +165,94 @@ router.post("/login", async (req, res) => {
     res.status(500).json({ msg: "❌ Error logging in", error: err.message });
   }
 });
+
+// =============== TEACHER → ADD ASSISTANT ===============
+router.post("/teacher/add-assistant", async (req, res) => {
+  try {
+    const { teacherId, name, email, password } = req.body;
+
+    if (!teacherId) {
+      return res.status(400).json({ msg: "❌ teacherId is required" });
+    }
+
+    // 🔎 Check if the user creating assistants is a main teacher
+    const teacher = await User.findById(teacherId);
+    if (!teacher) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+    if (teacher.assistantOf) {
+      return res.status(403).json({ msg: "❌ Assistants cannot create other assistants" });
+    }
+
+    // ✅ Normalize email
+    const exists = await User.findOne({ email: email.toLowerCase() });
+    if (exists) {
+      return res.status(400).json({ msg: "❌ Email already registered" });
+    }
+
+    // ✅ Hash password
+    const hashed = await bcrypt.hash(password, 10);
+
+    // ✅ Create assistant
+    const assistant = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashed,
+      role: "teacher",
+      assistantOf: teacherId, // links assistant to teacher
+    });
+
+    await assistant.save();
+    res.json({ msg: "✅ Assistant created successfully", assistant });
+  } catch (err) {
+    console.error("❌ Error adding assistant:", err);
+    res.status(500).json({ msg: "❌ Server error" });
+  }
+});
+
+
+
+// =============== TEACHER → LIST ASSISTANTS ===============
+router.get("/teacher/assistants/:teacherId", async (req, res) => {
+  try {
+    const { teacherId } = req.params;
+
+    if (!teacherId) {
+      return res.status(400).json({ msg: "❌ teacherId is required" });
+    }
+
+    const assistants = await User.find({ assistantOf: teacherId }).select("name email");
+    res.json(assistants);
+  } catch (err) {
+    console.error("❌ Error fetching assistants:", err);
+    res.status(500).json({ msg: "❌ Server error" });
+  }
+});
+
+
+
+// =============== TEACHER → DELETE ASSISTANT ===============
+router.delete("/teacher/delete-assistant/:teacherId/:assistantId", async (req, res) => {
+  try {
+    const { teacherId, assistantId } = req.params;
+
+    const assistant = await User.findById(assistantId);
+    if (!assistant) {
+      return res.status(404).json({ msg: "❌ Assistant not found" });
+    }
+
+    if (!assistant.assistantOf || assistant.assistantOf.toString() !== teacherId) {
+      return res.status(403).json({ msg: "❌ Not authorized to delete this assistant" });
+    }
+
+    await assistant.deleteOne();
+    res.json({ msg: "✅ Assistant deleted successfully" });
+  } catch (err) {
+    console.error("❌ Error deleting assistant:", err);
+    res.status(500).json({ msg: "❌ Server error" });
+  }
+});
+
 
 // Update parent details for a student (and create parent account if missing)
 router.post("/student/add-parent", async (req, res) => {
