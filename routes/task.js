@@ -35,11 +35,11 @@ router.post("/task", async (req, res) => {
     teacherId = await resolveTeacherId(teacherId);
     if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
-    // ✅ Fix deadline (convert local → ISO)
-    let adjustedDeadline = null;
+    // ✅ Convert teacher's local time → UTC before saving
+    let utcDeadline = null;
     if (deadline) {
-      const localDate = new Date(deadline);
-      adjustedDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
+      const localDate = new Date(deadline); // "2025-09-24T23:00" interpreted as local
+      utcDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
     }
 
     const task = new Task({
@@ -48,13 +48,14 @@ router.post("/task", async (req, res) => {
       teacherId,
       yearId,
       groups,
-      deadline: adjustedDeadline,
+      deadline: new Date(deadline), // stored in UTC
       gradeOutOf,
     });
 
     await task.save();
 
-    // ✅ Notify students
+    // ✅ Notify students (use teacher local time for email)
+    const teacherLocalDeadline = new Date(deadline); // original string already local to teacher
     const students = await User.find({ role: "student", groupId: { $in: groups } })
       .select("name email parentId");
 
@@ -75,7 +76,7 @@ router.post("/task", async (req, res) => {
             <ul>
               <li><b>Title:</b> ${title}</li>
               <li><b>Description:</b> ${description || "No description"}</li>
-              <li><b>Deadline:</b> ${adjustedDeadline.toLocaleString()}</li>
+              <li><b>Deadline:</b> ${teacherLocalDeadline.toLocaleString("en-GB")}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
           `,
@@ -98,7 +99,7 @@ router.post("/task", async (req, res) => {
             <ul>
               <li><b>Title:</b> ${title}</li>
               <li><b>Description:</b> ${description || "No description"}</li>
-              <li><b>Deadline:</b> ${adjustedDeadline.toLocaleString()}</li>
+              <li><b>Deadline:</b> ${teacherLocalDeadline.toLocaleString("en-GB")}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
           `,
@@ -120,16 +121,16 @@ router.put("/task/:id", async (req, res) => {
   try {
     const { title, description, deadline, gradeOutOf } = req.body;
 
-    // ✅ Fix deadline
-    let adjustedDeadline = null;
+    // ✅ Convert to UTC before updating
+    let utcDeadline = null;
     if (deadline) {
       const localDate = new Date(deadline);
-      adjustedDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
+      utcDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
     }
 
     const task = await Task.findByIdAndUpdate(
       req.params.id,
-      { title, description, deadline: adjustedDeadline, gradeOutOf },
+      { title, description, deadline: utcDeadline, gradeOutOf },
       { new: true }
     );
 
@@ -139,6 +140,7 @@ router.put("/task/:id", async (req, res) => {
     res.status(500).json({ msg: "❌ Error updating task", error: err.message });
   }
 });
+
 
 // ----------------- Delete Task -----------------
 router.delete("/task/:id", async (req, res) => {
