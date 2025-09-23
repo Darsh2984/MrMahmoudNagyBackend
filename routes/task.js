@@ -121,22 +121,21 @@ router.put("/task/:id", async (req, res) => {
   try {
     const { title, description, deadline, gradeOutOf } = req.body;
 
-    // ✅ Convert to UTC before updating
-    let utcDeadline = null;
-    if (deadline) {
-      const localDate = new Date(deadline);
-      utcDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
-    }
-
     const task = await Task.findByIdAndUpdate(
       req.params.id,
-      { title, description, deadline: utcDeadline, gradeOutOf },
+      {
+        title,
+        description,
+        deadline: deadline ? new Date(deadline) : undefined, // ✅ store directly
+        gradeOutOf,
+      },
       { new: true }
     );
 
     if (!task) return res.status(404).json({ msg: "❌ Task not found" });
     res.json({ msg: "✅ Task updated", task });
   } catch (err) {
+    console.error("❌ Error updating task:", err.message);
     res.status(500).json({ msg: "❌ Error updating task", error: err.message });
   }
 });
