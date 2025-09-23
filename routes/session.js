@@ -2,11 +2,29 @@ const express = require("express");
 const router = express.Router();
 const Session = require("../models/Session");
 const Group = require("../models/Group");
+const User = require("../models/User");
 
-// Create a session
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If assistant → map to real teacher
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id;
+}
+
+// ✅ Create a session
 router.post("/session", async (req, res) => {
   try {
-    const { title, teacherId, yearId, groupId } = req.body;
+    let { title, teacherId, yearId, groupId } = req.body;
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
 
     // make sure group belongs to that year
     const group = await Group.findOne({ _id: groupId, yearId }).populate("students");
@@ -15,7 +33,7 @@ router.post("/session", async (req, res) => {
     // prepare attendance list
     const attendance = group.students.map((student) => ({
       studentId: student._id,
-      status: "Absent"
+      status: "Absent",
     }));
 
     const session = new Session({ title, teacherId, yearId, groupId, attendance });
@@ -32,9 +50,7 @@ router.post("/session", async (req, res) => {
   }
 });
 
-
-
-// Update attendance
+// ✅ Update attendance
 router.put("/session/:id/attendance", async (req, res) => {
   try {
     const { attendance } = req.body; // [{ studentId, status }]
@@ -51,29 +67,42 @@ router.put("/session/:id/attendance", async (req, res) => {
   }
 });
 
-// Get sessions by Year
-router.get("/session/year/:yearId", async (req, res) => {
+// ✅ Get sessions by Year (teacher or assistant)
+router.get("/session/year/:yearId/:teacherId", async (req, res) => {
   try {
-    const sessions = await Session.find({ yearId: req.params.yearId })
+    let teacherId = await resolveTeacherId(req.params.teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const sessions = await Session.find({ yearId: req.params.yearId, teacherId })
       .populate("groupId")
       .populate("attendance.studentId");
+
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching sessions by year", error: err.message });
   }
 });
 
-// Get sessions for a group
-router.get("/session/group/:groupId", async (req, res) => {
+// ✅ Get sessions for a group (teacher or assistant)
+router.get("/session/group/:groupId/:teacherId", async (req, res) => {
   try {
-    const sessions = await Session.find({ groupId: req.params.groupId }).populate("attendance.studentId");
+    let teacherId = await resolveTeacherId(req.params.teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const sessions = await Session.find({ groupId: req.params.groupId, teacherId })
+      .populate("attendance.studentId");
+
     res.json(sessions);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching sessions", error: err.message });
   }
 });
 
-// Get a single session by ID
+// ✅ Get a single session by ID
 router.get("/session/:id", async (req, res) => {
   try {
     const session = await Session.findById(req.params.id)
@@ -90,7 +119,7 @@ router.get("/session/:id", async (req, res) => {
   }
 });
 
-// Get sessions for a specific student
+// ✅ Get sessions for a specific student
 router.get("/sessions/student/:studentId", async (req, res) => {
   try {
     const sessions = await Session.find({
@@ -104,6 +133,5 @@ router.get("/sessions/student/:studentId", async (req, res) => {
     res.status(500).json({ msg: "❌ Error fetching student sessions", error: err.message });
   }
 });
-
 
 module.exports = router;

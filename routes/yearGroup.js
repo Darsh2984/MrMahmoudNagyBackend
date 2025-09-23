@@ -4,11 +4,28 @@ const Year = require("../models/Year");
 const Group = require("../models/Group");
 const User = require("../models/User");
 
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
 
-// Create Year
+  // If assistant → map to real teacher
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id;
+}
+
+// ✅ Create Year
 router.post("/year", async (req, res) => {
   try {
-    const { name, teacherId } = req.body;
+    let { name, teacherId } = req.body;
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
     const year = new Year({ name, teacherId });
     await year.save();
     res.json(year);
@@ -17,13 +34,18 @@ router.post("/year", async (req, res) => {
   }
 });
 
-// Get all Years for a Teacher
+// ✅ Get all Years for a Teacher (or Assistant)
 router.get("/year/:teacherId", async (req, res) => {
   try {
-    const years = await Year.find({ teacherId: req.params.teacherId })
+    let teacherId = await resolveTeacherId(req.params.teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const years = await Year.find({ teacherId })
       .populate({
         path: "groups",
-        populate: { path: "students", select: "name email" }
+        populate: { path: "students", select: "name email" },
       });
 
     res.json(years);
@@ -32,10 +54,16 @@ router.get("/year/:teacherId", async (req, res) => {
   }
 });
 
-// Create Group inside a Year
+// ✅ Create Group inside a Year
 router.post("/group", async (req, res) => {
   try {
     const { name, yearId } = req.body;
+    const year = await Year.findById(yearId);
+
+    if (!year) {
+      return res.status(404).json({ msg: "❌ Year not found" });
+    }
+
     const group = new Group({ name, yearId });
     await group.save();
 
@@ -48,7 +76,7 @@ router.post("/group", async (req, res) => {
   }
 });
 
-// Get Groups of a Year
+// ✅ Get Groups of a Year
 router.get("/group/:yearId", async (req, res) => {
   try {
     const groups = await Group.find({ yearId: req.params.yearId }).populate("students");
@@ -58,10 +86,10 @@ router.get("/group/:yearId", async (req, res) => {
   }
 });
 
-// Add multiple students to a group
+// ✅ Add multiple students to a group
 router.post("/group/:groupId/add-student", async (req, res) => {
   try {
-    const { studentIds } = req.body; // ✅ expects an array of student IDs
+    const { studentIds } = req.body; // expects array of student IDs
     const group = await Group.findById(req.params.groupId).populate("yearId");
 
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
@@ -74,17 +102,17 @@ router.post("/group/:groupId/add-student", async (req, res) => {
     let skippedStudents = [];
 
     for (const studentId of studentIds) {
-      // ✅ Check if student already belongs to another group
+      // check if student already belongs to another group
       const existingGroup = await Group.findOne({ students: studentId });
       if (existingGroup) {
         skippedStudents.push(studentId);
         continue;
       }
 
-      // 1️⃣ Add student to group
+      // Add student to group
       group.students.push(studentId);
 
-      // 2️⃣ Update student with groupId + yearId
+      // Update student with groupId + yearId
       await User.findByIdAndUpdate(studentId, {
         groupId: group._id,
         yearId: group.yearId,
@@ -100,7 +128,7 @@ router.post("/group/:groupId/add-student", async (req, res) => {
       groupId: group._id,
       yearId: group.yearId,
       addedStudents,
-      skippedStudents, // helpful for frontend feedback
+      skippedStudents,
     });
   } catch (err) {
     console.error("❌ Error adding students:", err);
@@ -108,9 +136,7 @@ router.post("/group/:groupId/add-student", async (req, res) => {
   }
 });
 
-
-
-// Remove student from group
+// ✅ Remove student from group
 router.delete("/group/:groupId/remove-student/:studentId", async (req, res) => {
   try {
     const { groupId, studentId } = req.params;
@@ -118,13 +144,11 @@ router.delete("/group/:groupId/remove-student/:studentId", async (req, res) => {
     const group = await Group.findById(groupId);
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
 
-    // 1️⃣ Remove student from group
-    group.students = group.students.filter(
-      (s) => s.toString() !== studentId
-    );
+    // Remove student from group
+    group.students = group.students.filter((s) => s.toString() !== studentId);
     await group.save();
 
-    // 2️⃣ Clear student's groupId & yearId
+    // Clear student's groupId & yearId
     await User.findByIdAndUpdate(studentId, {
       groupId: null,
       yearId: null,
@@ -137,11 +161,10 @@ router.delete("/group/:groupId/remove-student/:studentId", async (req, res) => {
   }
 });
 
-// Get all students in a specific group
+// ✅ Get all students in a specific group
 router.get("/group/:groupId/students", async (req, res) => {
   try {
-    const group = await Group.findById(req.params.groupId)
-      .populate("students", "name email role"); // only bring useful fields
+    const group = await Group.findById(req.params.groupId).populate("students", "name email role");
 
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
 
@@ -152,11 +175,10 @@ router.get("/group/:groupId/students", async (req, res) => {
   }
 });
 
-// Get the Year of a specific student
+// ✅ Get the Year of a specific student
 router.get("/student/:studentId/year", async (req, res) => {
   try {
-    const group = await Group.findOne({ students: req.params.studentId })
-      .populate("yearId", "name teacherId");
+    const group = await Group.findOne({ students: req.params.studentId }).populate("yearId", "name teacherId");
 
     if (!group) {
       return res.status(404).json({ msg: "❌ Student is not assigned to any group" });
@@ -172,6 +194,5 @@ router.get("/student/:studentId/year", async (req, res) => {
     res.status(500).json({ msg: "❌ Error fetching student year", error: err.message });
   }
 });
-
 
 module.exports = router;

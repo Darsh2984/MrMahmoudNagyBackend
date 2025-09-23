@@ -9,10 +9,27 @@ const QuizSubmission = require("../models/QuizSubmission");
 const Group = require("../models/Group");
 const User = require("../models/User");
 
-// GET /api/performance/export/:groupId
-router.get("/export/:groupId", async (req, res) => {
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If this is an assistant, return the main teacher’s ID
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id; // main teacher
+}
+
+// ----------------- Export Group Performance -----------------
+router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
   try {
-    const { groupId } = req.params;
+    let { groupId, teacherId } = req.params;
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
 
     // 1. Fetch this group with students
     const group = await Group.findById(groupId)
@@ -20,14 +37,14 @@ router.get("/export/:groupId", async (req, res) => {
         path: "students",
         populate: { path: "parentId", select: "name parentPhone" },
       });
-      if (!group) {
+    if (!group) {
       return res.status(404).json({ msg: "❌ Group not found" });
     }
 
     // 2. Get tasks & quizzes for this group
-    const tasks = await Task.find({ groups: groupId });
-    const quizzes = await Quiz.find({ groups: groupId });
-    const sessions = await Session.find({ groupId });
+    const tasks = await Task.find({ groups: groupId, teacherId });
+    const quizzes = await Quiz.find({ groups: groupId, teacherId });
+    const sessions = await Session.find({ groupId, teacherId });
 
     // 3. Create workbook
     const workbook = new ExcelJS.Workbook();
@@ -127,18 +144,22 @@ router.get("/export/:groupId", async (req, res) => {
   }
 });
 
-
-// Get full performance of a student inside a group
-router.get("/:groupId/:studentId", async (req, res) => {
+// ----------------- Get Student Performance -----------------
+router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
   try {
-    const { groupId, studentId } = req.params;
+    let { groupId, studentId, teacherId } = req.params;
 
     if (!groupId || groupId === "null") {
       return res.status(400).json({ msg: "❌ Student is not assigned to a group" });
     }
 
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
     // Attendance
-    const sessions = await Session.find({ groupId }).populate("attendance.studentId");
+    const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
     const attendance = sessions.map((s) => {
       const studentAttendance = s.attendance.find(
         (a) => a.studentId._id.toString() === studentId
@@ -151,7 +172,7 @@ router.get("/:groupId/:studentId", async (req, res) => {
     });
 
     // Tasks
-    const tasks = await Task.find({ groups: groupId });
+    const tasks = await Task.find({ groups: groupId, teacherId });
     const submissions = await Submission.find({
       studentId,
       taskId: { $in: tasks.map((t) => t._id) },
@@ -163,7 +184,7 @@ router.get("/:groupId/:studentId", async (req, res) => {
     }));
 
     // Quizzes
-    const quizzes = await Quiz.find({ groups: groupId }).populate("questions");
+    const quizzes = await Quiz.find({ groups: groupId, teacherId }).populate("questions");
     const quizSubmissions = await QuizSubmission.find({
       studentId,
       quizId: { $in: quizzes.map((q) => q._id) },
@@ -175,7 +196,7 @@ router.get("/:groupId/:studentId", async (req, res) => {
       );
       return {
         quizTitle: q.title,
-        score: submission ? submission.score : null, // adjust field if needed
+        score: submission ? submission.score : null,
         total: q.questions.length,
       };
     });

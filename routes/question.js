@@ -1,6 +1,7 @@
 const express = require("express");
 const axios = require("axios");
 const Question = require("../models/Question");
+const User = require("../models/User");
 const { questionUpload } = require("../middleware/upload");
 
 const router = express.Router();
@@ -10,13 +11,30 @@ const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE; // e.g. "studentfiles
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;     // from Bunny dashboard
 const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your storage hostname
 
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If assistant → map to real teacher
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id;
+}
+
 // ---------------- CREATE QUESTION ----------------
 router.post("/question", questionUpload.single("image"), async (req, res) => {
   try {
-    const { correctAnswer, unitId, chapterId, teacherId, yearId } = req.body;
+    let { correctAnswer, unitId, chapterId, teacherId, yearId } = req.body;
 
     if (!req.file || !correctAnswer || !unitId || !chapterId || !teacherId || !yearId) {
       return res.status(400).json({ msg: "❌ Missing required fields" });
+    }
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
     }
 
     const fileName = Date.now() + "-" + req.file.originalname;
@@ -39,7 +57,7 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
       unitId,
       chapterId,
       teacherId,
-      yearId, // ✅ save yearId
+      yearId,
     });
 
     await question.save();
@@ -53,7 +71,12 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
 // ---------------- GET ALL QUESTIONS ----------------
 router.get("/questions/:teacherId", async (req, res) => {
   try {
-    const questions = await Question.find({ teacherId: req.params.teacherId })
+    let teacherId = await resolveTeacherId(req.params.teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const questions = await Question.find({ teacherId })
       .populate("yearId", "name")
       .populate("unitId", "name")
       .populate("chapterId", "name");
@@ -64,13 +87,19 @@ router.get("/questions/:teacherId", async (req, res) => {
   }
 });
 
-// routes/question.js
+// ---------------- GET QUESTIONS BY YEAR ----------------
 router.get("/questions/:teacherId/:yearId", async (req, res) => {
   try {
-    const { teacherId, yearId } = req.params;
+    let { teacherId, yearId } = req.params;
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
     const questions = await Question.find({ teacherId, yearId })
       .populate("unitId", "name")
       .populate("chapterId", "name");
+
     res.json(questions);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching questions", error: err.message });
@@ -91,10 +120,21 @@ router.get("/questions/chapter/:chapterId", async (req, res) => {
 });
 
 // ---------------- DELETE QUESTION ----------------
-router.delete("/question/:id", async (req, res) => {
+router.delete("/question/:id/:teacherId", async (req, res) => {
   try {
-    const question = await Question.findById(req.params.id);
+    const { id, teacherId } = req.params;
+    const resolvedTeacherId = await resolveTeacherId(teacherId);
+    if (!resolvedTeacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const question = await Question.findById(id);
     if (!question) return res.status(404).json({ msg: "❌ Question not found" });
+
+    // ensure ownership
+    if (question.teacherId.toString() !== resolvedTeacherId.toString()) {
+      return res.status(403).json({ msg: "❌ Not authorized to delete this question" });
+    }
 
     // Delete from Bunny
     const path = question.imageUrl.split(".b-cdn.net/")[1]; // e.g. "questions/filename.png"
@@ -104,7 +144,7 @@ router.delete("/question/:id", async (req, res) => {
     });
 
     // Delete from DB
-    await Question.findByIdAndDelete(req.params.id);
+    await Question.findByIdAndDelete(id);
 
     res.json({ msg: "✅ Question deleted" });
   } catch (err) {

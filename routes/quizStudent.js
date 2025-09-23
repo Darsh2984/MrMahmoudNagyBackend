@@ -4,10 +4,21 @@ const User = require("../models/User");
 const QuizSubmission = require("../models/QuizSubmission");
 const Group = require("../models/Group");
 
-
 const router = express.Router();
 
-// Get quizzes available for a student + submission status
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If assistant → map to real teacher
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id;
+}
+
+// 🔹 Get quizzes available for a student + submission status
 router.get("/:studentId", async (req, res) => {
   try {
     const studentId = req.params.studentId;
@@ -42,7 +53,6 @@ router.get("/:studentId", async (req, res) => {
     res.status(500).json({ msg: "Failed to fetch quizzes" });
   }
 });
-
 
 // 2️⃣ Submit quiz answers
 router.post("/:quizId/submit", async (req, res) => {
@@ -107,15 +117,30 @@ router.get("/:quizId/submission/:studentId", async (req, res) => {
   }
 });
 
-// 🔹 Get all submissions for a quiz (teacher view)
-router.get("/:quizId/submissions", async (req, res) => {
+// 🔹 Get all submissions for a quiz (teacher or assistant view)
+router.get("/:quizId/submissions/:teacherId", async (req, res) => {
   try {
-    const submissions = await QuizSubmission.find({ quizId: req.params.quizId })
-      .populate("studentId", "name email") // show student details
+    const { quizId, teacherId } = req.params;
+    const resolvedTeacherId = await resolveTeacherId(teacherId);
+
+    if (!resolvedTeacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    // verify that this quiz belongs to teacher (or their assistant)
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) return res.status(404).json({ msg: "Quiz not found" });
+
+    if (quiz.teacherId.toString() !== resolvedTeacherId.toString()) {
+      return res.status(403).json({ msg: "❌ Not authorized to view submissions for this quiz" });
+    }
+
+    const submissions = await QuizSubmission.find({ quizId })
+      .populate("studentId", "name email")
       .populate("quizId", "title");
 
     if (!submissions || submissions.length === 0) {
-      return res.json([]); // no submissions yet
+      return res.json([]);
     }
 
     const formatted = submissions.map((s) => ({
@@ -125,7 +150,7 @@ router.get("/:quizId/submissions", async (req, res) => {
         email: s.studentId.email,
       },
       score: s.score,
-      total: s.answers.length, // or use s.quizId.questions.length if you prefer
+      total: s.answers.length,
     }));
 
     res.json(formatted);
@@ -134,6 +159,5 @@ router.get("/:quizId/submissions", async (req, res) => {
     res.status(500).json({ msg: "❌ Failed to fetch quiz submissions" });
   }
 });
-
 
 module.exports = router;

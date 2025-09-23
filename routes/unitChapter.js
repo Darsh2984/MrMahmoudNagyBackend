@@ -2,52 +2,79 @@ const express = require("express");
 const router = express.Router();
 const Unit = require("../models/Unit");
 const Chapter = require("../models/Chapter");
+const User = require("../models/User");
+
+// 🔹 Helper: Resolve Teacher ID (assistant → real teacher)
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+  return user.assistantOf || user._id;
+}
 
 // ----------------- UNITS -----------------
 
 // Create Unit
 router.post("/unit", async (req, res) => {
-  const { name, teacherId, yearId } = req.body;
-  if (!name || !teacherId || !yearId) {
-    return res.status(400).json({ msg: "Name, Teacher ID and Year ID are required" });
+  try {
+    let { name, teacherId, yearId } = req.body;
+    if (!name || !teacherId || !yearId) {
+      return res
+        .status(400)
+        .json({ msg: "❌ Name, Teacher ID and Year ID are required" });
+    }
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
+
+    const unit = new Unit({ name, teacherId, yearId });
+    await unit.save();
+    res.json(unit);
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error creating unit", error: err.message });
   }
-  const unit = new Unit({ name, teacherId, yearId });
-  await unit.save();
-  res.json(unit);
 });
 
 // Get Units for a Teacher + Year
 router.get("/unit/:teacherId/:yearId", async (req, res) => {
   try {
-    const { teacherId, yearId } = req.params;
+    let { teacherId, yearId } = req.params;
+    teacherId = await resolveTeacherId(teacherId);
+
     const units = await Unit.find({ teacherId, yearId }).populate("chapters");
     res.json(units);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error fetching units", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error fetching units", error: err.message });
   }
 });
 
 // Get Units for a Teacher (all years)
 router.get("/unit/:teacherId", async (req, res) => {
   try {
-    const units = await Unit.find({ teacherId: req.params.teacherId }).populate("chapters");
+    let { teacherId } = req.params;
+    teacherId = await resolveTeacherId(teacherId);
+
+    const units = await Unit.find({ teacherId }).populate("chapters");
     res.json(units);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error fetching units", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error fetching units", error: err.message });
   }
 });
 
-// ✅ NEW: Get Units for a Student by Year
+// ✅ Student: Get Units by Year (no teacher restriction)
 router.get("/unit/student/:studentId/year/:yearId/units", async (req, res) => {
   try {
     const { yearId } = req.params;
-
-    // Return only units of this year (no need for teacherId on student side)
     const units = await Unit.find({ yearId }).populate("chapters");
     res.json(units);
   } catch (err) {
     console.error("❌ Error fetching student units:", err.message);
-    res.status(500).json({ msg: "❌ Error fetching student units", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error fetching student units", error: err.message });
   }
 });
 
@@ -55,10 +82,16 @@ router.get("/unit/student/:studentId/year/:yearId/units", async (req, res) => {
 router.put("/unit/:id", async (req, res) => {
   try {
     const { name } = req.body;
-    const updated = await Unit.findByIdAndUpdate(req.params.id, { name }, { new: true });
+    const updated = await Unit.findByIdAndUpdate(
+      req.params.id,
+      { name },
+      { new: true }
+    );
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error updating unit", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error updating unit", error: err.message });
   }
 });
 
@@ -68,14 +101,14 @@ router.delete("/unit/:id", async (req, res) => {
     const unit = await Unit.findById(req.params.id);
     if (!unit) return res.status(404).json({ msg: "Unit not found" });
 
-    // delete chapters under this unit
-    await Chapter.deleteMany({ unitId: unit._id });
+    await Chapter.deleteMany({ unitId: unit._id }); // delete chapters
+    await unit.deleteOne(); // delete unit
 
-    // delete unit
-    await unit.deleteOne();
     res.json({ msg: "✅ Unit and its chapters deleted" });
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error deleting unit", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error deleting unit", error: err.message });
   }
 });
 
@@ -85,17 +118,19 @@ router.delete("/unit/:id", async (req, res) => {
 router.post("/chapter", async (req, res) => {
   try {
     const { name, unitId } = req.body;
-    if (!name || !unitId) return res.status(400).json({ msg: "Name and Unit ID are required" });
+    if (!name || !unitId)
+      return res.status(400).json({ msg: "Name and Unit ID are required" });
 
     const chapter = new Chapter({ name, unitId });
     await chapter.save();
 
-    // link chapter to unit
     await Unit.findByIdAndUpdate(unitId, { $push: { chapters: chapter._id } });
 
     res.json(chapter);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error creating chapter", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error creating chapter", error: err.message });
   }
 });
 
@@ -103,10 +138,16 @@ router.post("/chapter", async (req, res) => {
 router.put("/chapter/:id", async (req, res) => {
   try {
     const { name } = req.body;
-    const updated = await Chapter.findByIdAndUpdate(req.params.id, { name }, { new: true });
+    const updated = await Chapter.findByIdAndUpdate(
+      req.params.id,
+      { name },
+      { new: true }
+    );
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error updating chapter", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error updating chapter", error: err.message });
   }
 });
 
@@ -116,15 +157,17 @@ router.delete("/chapter/:id", async (req, res) => {
     const chapter = await Chapter.findById(req.params.id);
     if (!chapter) return res.status(404).json({ msg: "Chapter not found" });
 
-    // remove reference from unit
-    await Unit.findByIdAndUpdate(chapter.unitId, { $pull: { chapters: chapter._id } });
+    await Unit.findByIdAndUpdate(chapter.unitId, {
+      $pull: { chapters: chapter._id },
+    });
 
-    // delete chapter
     await chapter.deleteOne();
 
     res.json({ msg: "✅ Chapter deleted" });
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error deleting chapter", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error deleting chapter", error: err.message });
   }
 });
 
@@ -135,7 +178,9 @@ router.get("/chapter/:unitId", async (req, res) => {
     res.json(chapters);
   } catch (err) {
     console.error("❌ Error fetching chapters:", err.message);
-    res.status(500).json({ msg: "❌ Error fetching chapters", error: err.message });
+    res
+      .status(500)
+      .json({ msg: "❌ Error fetching chapters", error: err.message });
   }
 });
 

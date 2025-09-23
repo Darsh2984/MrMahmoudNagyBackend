@@ -5,51 +5,56 @@ const Task = require("../models/Task");
 const Submission = require("../models/Submission");
 const multer = require("multer");
 const User = require("../models/User");
-const transporter = require("../config/nodemailer"); // ✅ already configured
+const transporter = require("../config/nodemailer");
 
 // ----------------- Multer In-Memory -----------------
 const upload = multer({ storage: multer.memoryStorage() });
 const uploadCorrected = multer({ storage: multer.memoryStorage() });
 
 // ----------------- Bunny Config -----------------
-const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE; 
+const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;
-const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; 
+const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com";
+
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+  return user.assistantOf || user._id;
+}
 
 // ----------------- Create Task -----------------
 router.post("/task", async (req, res) => {
   try {
-    const { title, description, teacherId, yearId, groups, deadline, gradeOutOf } = req.body;
+    let { title, description, teacherId, yearId, groups, deadline, gradeOutOf } = req.body;
 
     if (!groups || !Array.isArray(groups) || groups.length === 0) {
       return res.status(400).json({ msg: "❌ At least one group must be selected" });
     }
 
-    // ✅ Save the task with deadline (date + time)
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
+
     const task = new Task({
       title,
       description,
       teacherId,
       yearId,
       groups,
-      deadline: new Date(deadline), // ensures proper Date object
+      deadline: new Date(deadline),
       gradeOutOf,
     });
 
     await task.save();
 
-    // ✅ Fetch all students in the selected groups
-    const students = await User.find({
-      role: "student",
-      groupId: { $in: groups }
-    }).select("name email parentId");
+    // ✅ Notify students
+    const students = await User.find({ role: "student", groupId: { $in: groups } })
+      .select("name email parentId");
 
-    // ✅ If parent accounts exist, fetch them too
     const parents = await User.find({
       _id: { $in: students.map((s) => s.parentId).filter(Boolean) },
     }).select("email name");
 
-    // ✅ Send emails to students
     for (const student of students) {
       try {
         await transporter.sendMail({
@@ -66,15 +71,13 @@ router.post("/task", async (req, res) => {
               <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
-            <p>Please make sure to submit before the deadline.</p>
           `,
         });
-      } catch (mailErr) {
-        console.warn(`⚠️ Failed to send mail to ${student.email}:`, mailErr.message);
+      } catch (err) {
+        console.warn(`⚠️ Failed to send email to ${student.email}:`, err.message);
       }
     }
 
-    // ✅ Optionally send to parents
     for (const parent of parents) {
       try {
         await transporter.sendMail({
@@ -91,11 +94,10 @@ router.post("/task", async (req, res) => {
               <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
-            <p>You can follow up with your child to ensure timely submission.</p>
           `,
         });
-      } catch (mailErr) {
-        console.warn(`⚠️ Failed to send mail to parent ${parent.email}:`, mailErr.message);
+      } catch (err) {
+        console.warn(`⚠️ Failed to send email to parent ${parent.email}:`, err.message);
       }
     }
 
@@ -110,23 +112,14 @@ router.post("/task", async (req, res) => {
 router.put("/task/:id", async (req, res) => {
   try {
     const { title, description, deadline, gradeOutOf } = req.body;
-
     const task = await Task.findByIdAndUpdate(
       req.params.id,
-      {
-        title,
-        description,
-        deadline: new Date(deadline),
-        gradeOutOf,
-      },
+      { title, description, deadline: new Date(deadline), gradeOutOf },
       { new: true }
     );
-
     if (!task) return res.status(404).json({ msg: "❌ Task not found" });
-
     res.json({ msg: "✅ Task updated", task });
   } catch (err) {
-    console.error("❌ Error updating task:", err.message);
     res.status(500).json({ msg: "❌ Error updating task", error: err.message });
   }
 });
@@ -137,17 +130,12 @@ router.delete("/task/:id", async (req, res) => {
     const task = await Task.findByIdAndDelete(req.params.id);
     if (!task) return res.status(404).json({ msg: "❌ Task not found" });
 
-    // Optionally: delete related submissions
     await Submission.deleteMany({ taskId: req.params.id });
-
     res.json({ msg: "✅ Task deleted" });
   } catch (err) {
-    console.error("❌ Error deleting task:", err.message);
     res.status(500).json({ msg: "❌ Error deleting task", error: err.message });
   }
 });
-
-
 
 // ----------------- Student Upload Submission -----------------
 router.post("/submission", upload.single("file"), async (req, res) => {
@@ -160,20 +148,12 @@ router.post("/submission", upload.single("file"), async (req, res) => {
     const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
 
     await axios.put(uploadUrl, req.file.buffer, {
-      headers: {
-        AccessKey: BUNNY_ACCESS_KEY,
-        "Content-Type": "application/octet-stream",
-      },
+      headers: { AccessKey: BUNNY_ACCESS_KEY, "Content-Type": "application/octet-stream" },
       maxBodyLength: Infinity,
     });
 
     const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
-
-    const submission = new Submission({
-      taskId,
-      studentId,
-      fileUrl: cdnUrl,
-    });
+    const submission = new Submission({ taskId, studentId, fileUrl: cdnUrl });
 
     await submission.save();
     res.json({ msg: "✅ Submission uploaded", submission });
@@ -206,51 +186,35 @@ router.get("/group/:groupId", async (req, res) => {
 router.put("/submission/:submissionId/grade", uploadCorrected.single("file"), async (req, res) => {
   try {
     const { comments, grade } = req.body;
-
     const submission = await Submission.findById(req.params.submissionId);
     if (!submission) return res.status(404).json({ msg: "❌ Submission not found" });
 
-    const updateData = {
-      comments,
-      grade,
-      gradedAt: new Date(),
-    };
+    const updateData = { comments, grade, gradedAt: new Date() };
 
     if (req.file) {
-      // 🔹 If old corrected file exists → delete from Bunny
       if (submission.correctedFileUrl) {
         const oldPath = submission.correctedFileUrl.split(".b-cdn.net/")[1];
         const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${oldPath}`;
         try {
           await axios.delete(deleteUrl, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
-        } catch (delErr) {
-          console.warn("⚠️ Failed to delete old corrected file:", delErr.message);
+        } catch (err) {
+          console.warn("⚠️ Failed to delete old corrected file:", err.message);
         }
       }
 
-      // 🔹 Upload new corrected file
       const fileName = Date.now() + "-corrected-" + req.file.originalname;
       const path = `corrected/${fileName}`;
       const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
 
       await axios.put(uploadUrl, req.file.buffer, {
-        headers: {
-          AccessKey: BUNNY_ACCESS_KEY,
-          "Content-Type": "application/octet-stream",
-        },
+        headers: { AccessKey: BUNNY_ACCESS_KEY, "Content-Type": "application/octet-stream" },
         maxBodyLength: Infinity,
       });
 
-      const cdnUrl = `https://${BUNNY_STORAGE_ZONE}.b-cdn.net/${path}`;
-      updateData.correctedFileUrl = cdnUrl;
+      updateData.correctedFileUrl = `https://${BUNNY_STORAGE_ZONE}.b-cdn.net/${path}`;
     }
 
-    const updated = await Submission.findByIdAndUpdate(
-      req.params.submissionId,
-      updateData,
-      { new: true }
-    );
-
+    const updated = await Submission.findByIdAndUpdate(req.params.submissionId, updateData, { new: true });
     res.json({ msg: "✅ Submission graded", submission: updated });
   } catch (err) {
     res.status(500).json({ msg: "❌ Error grading submission", error: err.message });
@@ -261,32 +225,29 @@ router.put("/submission/:submissionId/grade", uploadCorrected.single("file"), as
 router.delete("/submission/:id", async (req, res) => {
   try {
     const submission = await Submission.findById(req.params.id);
-    if (!submission) return res.status(404).json({ msg: "Submission not found" });
+    if (!submission) return res.status(404).json({ msg: "❌ Submission not found" });
 
-    // 🔹 Delete submission file from Bunny
     if (submission.fileUrl) {
       const path = submission.fileUrl.split(".b-cdn.net/")[1];
       const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
       try {
         await axios.delete(deleteUrl, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
-      } catch (delErr) {
-        console.warn("⚠️ Failed to delete submission file:", delErr.message);
+      } catch (err) {
+        console.warn("⚠️ Failed to delete submission file:", err.message);
       }
     }
 
-    // 🔹 Delete corrected file if exists
     if (submission.correctedFileUrl) {
       const path = submission.correctedFileUrl.split(".b-cdn.net/")[1];
       const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
       try {
         await axios.delete(deleteUrl, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
-      } catch (delErr) {
-        console.warn("⚠️ Failed to delete corrected file:", delErr.message);
+      } catch (err) {
+        console.warn("⚠️ Failed to delete corrected file:", err.message);
       }
     }
 
     await Submission.findByIdAndDelete(req.params.id);
-
     res.json({ msg: "✅ Submission deleted" });
   } catch (err) {
     res.status(500).json({ msg: "❌ Error deleting submission", error: err.message });

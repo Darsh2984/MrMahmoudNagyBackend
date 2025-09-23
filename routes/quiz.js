@@ -2,15 +2,34 @@ const express = require("express");
 const Quiz = require("../models/Quiz");
 const Group = require("../models/Group");
 const QuizSubmission = require("../models/QuizSubmission");
+const User = require("../models/User");
+
 const router = express.Router();
 
-// Create Quiz
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+
+  // If assistant → map to real teacher
+  if (user.assistantOf) {
+    return user.assistantOf;
+  }
+  return user._id;
+}
+
+// ---------------- CREATE QUIZ ----------------
 router.post("/", async (req, res) => {
   try {
-    const { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
+    let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
 
     if (!title || !teacherId || !groups?.length || !duration) {
       return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
+    }
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
     }
 
     const quiz = new Quiz({
@@ -31,10 +50,15 @@ router.post("/", async (req, res) => {
   }
 });
 
-// Get all quizzes for teacher
+// ---------------- GET ALL QUIZZES FOR TEACHER ----------------
 router.get("/teacher/:teacherId", async (req, res) => {
   try {
-    const quizzes = await Quiz.find({ teacherId: req.params.teacherId })
+    let teacherId = await resolveTeacherId(req.params.teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const quizzes = await Quiz.find({ teacherId })
       .populate("groups", "name")
       .populate("questions", "imageUrl")
       .sort({ createdAt: -1 });
@@ -46,10 +70,26 @@ router.get("/teacher/:teacherId", async (req, res) => {
   }
 });
 
-// Delete quiz
-router.delete("/:quizId", async (req, res) => {
+// ---------------- DELETE QUIZ ----------------
+router.delete("/:quizId/:teacherId", async (req, res) => {
   try {
-    await Quiz.findByIdAndDelete(req.params.quizId);
+    const { quizId, teacherId } = req.params;
+    const resolvedTeacherId = await resolveTeacherId(teacherId);
+    if (!resolvedTeacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
+
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({ msg: "❌ Quiz not found" });
+    }
+
+    // ensure ownership
+    if (quiz.teacherId.toString() !== resolvedTeacherId.toString()) {
+      return res.status(403).json({ msg: "❌ Not authorized to delete this quiz" });
+    }
+
+    await Quiz.findByIdAndDelete(quizId);
     res.json({ msg: "✅ Quiz deleted" });
   } catch (err) {
     console.error("❌ Error deleting quiz:", err);
@@ -57,7 +97,7 @@ router.delete("/:quizId", async (req, res) => {
   }
 });
 
-// Get single quiz with safe question data
+// ---------------- GET SINGLE QUIZ (safe data) ----------------
 router.get("/id/:quizId", async (req, res) => {
   try {
     const quiz = await Quiz.findById(req.params.quizId)
@@ -83,18 +123,17 @@ router.get("/id/:quizId", async (req, res) => {
   }
 });
 
-// Get all submissions for a quiz
+// ---------------- GET ALL SUBMISSIONS FOR QUIZ ----------------
 router.get("/:quizId/submissions", async (req, res) => {
   try {
     const submissions = await QuizSubmission.find({ quizId: req.params.quizId })
-      .populate("studentId", "name email") // student basic info
+      .populate("studentId", "name email")
       .populate("quizId", "title");
 
     if (!submissions || submissions.length === 0) {
       return res.json([]);
     }
 
-    // attach group info for each student
     const formatted = await Promise.all(
       submissions.map(async (s) => {
         const group = await Group.findOne({ students: s.studentId._id }).select("name");
@@ -114,8 +153,7 @@ router.get("/:quizId/submissions", async (req, res) => {
   }
 });
 
-
-// 3️⃣ Get student submission details
+// ---------------- GET STUDENT SUBMISSION DETAILS ----------------
 router.get("/:quizId/submission/:studentId", async (req, res) => {
   try {
     const submission = await QuizSubmission.findOne({
@@ -138,7 +176,5 @@ router.get("/:quizId/submission/:studentId", async (req, res) => {
     res.status(500).json({ msg: "Failed to fetch submission" });
   }
 });
-
-
 
 module.exports = router;

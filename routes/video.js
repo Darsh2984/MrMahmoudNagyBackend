@@ -3,6 +3,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const Video = require("../models/Video");
+const User = require("../models/User");
 const { videoUpload } = require("../middleware/upload");
 
 const router = express.Router();
@@ -15,11 +16,21 @@ const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // region host
 // ----------------- Progress Tracker -----------------
 let currentProgress = {};
 
+// ----------------- Helper: Resolve Teacher ID -----------------
+async function resolveTeacherId(teacherId) {
+  const user = await User.findById(teacherId);
+  if (!user) return null;
+  return user.assistantOf || user._id;
+}
+
 // ----------------- Upload Video -----------------
 router.post("/", videoUpload.single("video"), async (req, res) => {
   try {
-    const { title, yearId, unitId, chapterId, teacherId, uploadId } = req.body;
+    let { title, yearId, unitId, chapterId, teacherId, uploadId } = req.body;
     if (!req.file) return res.status(400).json({ msg: "❌ Video file required" });
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
     const fileName = Date.now() + "-" + req.file.originalname;
     const storagePath = `videos/${fileName}`;
@@ -32,7 +43,6 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
     const stream = fs.createReadStream(req.file.path);
     let uploadedBytes = 0;
 
-    // track chunks
     stream.on("data", (chunk) => {
       uploadedBytes += chunk.length;
       currentProgress[uploadId] = Math.round((uploadedBytes / fileSize) * 100);
@@ -64,7 +74,6 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
 
     await video.save();
 
-    // ✅ Ensure final 100%
     currentProgress[uploadId] = 100;
     setTimeout(() => delete currentProgress[uploadId], 10000);
 
@@ -78,8 +87,11 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
 // ----------------- Add Video by URL -----------------
 router.post("/url", async (req, res) => {
   try {
-    const { title, videoUrl, yearId, unitId, chapterId, teacherId } = req.body;
+    let { title, videoUrl, yearId, unitId, chapterId, teacherId } = req.body;
     if (!videoUrl) return res.status(400).json({ msg: "❌ Video URL required" });
+
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
     const video = new Video({
       title,
@@ -97,8 +109,6 @@ router.post("/url", async (req, res) => {
     res.status(500).json({ msg: "❌ Error saving video URL", error: err.message });
   }
 });
-
-
 
 // ----------------- List Videos by Year -----------------
 router.get("/year/:yearId", async (req, res) => {
