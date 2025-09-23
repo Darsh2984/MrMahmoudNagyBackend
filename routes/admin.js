@@ -2,7 +2,9 @@ const express = require("express");
 const router = express.Router();
 const ExcelJS = require("exceljs");
 
-const User = require("../models/User"); // adjust path
+const User = require("../models/User");
+const Task = require("../models/Task");
+const Submission = require("../models/Submission");
 
 // ============================================================
 // 🔹 Export ALL Users
@@ -106,5 +108,7 @@ router.get("/export-students", async (req, res) => {
     res.status(500).json({ msg: "❌ Failed to export students" });
   }
 });
+
+
 
 module.exports = router;
