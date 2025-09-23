@@ -35,13 +35,20 @@ router.post("/task", async (req, res) => {
     teacherId = await resolveTeacherId(teacherId);
     if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
+    // ✅ Fix deadline (convert local → ISO)
+    let adjustedDeadline = null;
+    if (deadline) {
+      const localDate = new Date(deadline);
+      adjustedDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
+    }
+
     const task = new Task({
       title,
       description,
       teacherId,
       yearId,
       groups,
-      deadline: new Date(deadline),
+      deadline: adjustedDeadline,
       gradeOutOf,
     });
 
@@ -68,7 +75,7 @@ router.post("/task", async (req, res) => {
             <ul>
               <li><b>Title:</b> ${title}</li>
               <li><b>Description:</b> ${description || "No description"}</li>
-              <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
+              <li><b>Deadline:</b> ${adjustedDeadline.toLocaleString()}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
           `,
@@ -91,7 +98,7 @@ router.post("/task", async (req, res) => {
             <ul>
               <li><b>Title:</b> ${title}</li>
               <li><b>Description:</b> ${description || "No description"}</li>
-              <li><b>Deadline:</b> ${new Date(deadline).toLocaleString()}</li>
+              <li><b>Deadline:</b> ${adjustedDeadline.toLocaleString()}</li>
               <li><b>Marks:</b> Out of ${gradeOutOf}</li>
             </ul>
           `,
@@ -112,11 +119,20 @@ router.post("/task", async (req, res) => {
 router.put("/task/:id", async (req, res) => {
   try {
     const { title, description, deadline, gradeOutOf } = req.body;
+
+    // ✅ Fix deadline
+    let adjustedDeadline = null;
+    if (deadline) {
+      const localDate = new Date(deadline);
+      adjustedDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
+    }
+
     const task = await Task.findByIdAndUpdate(
       req.params.id,
-      { title, description, deadline: new Date(deadline), gradeOutOf },
+      { title, description, deadline: adjustedDeadline, gradeOutOf },
       { new: true }
     );
+
     if (!task) return res.status(404).json({ msg: "❌ Task not found" });
     res.json({ msg: "✅ Task updated", task });
   } catch (err) {

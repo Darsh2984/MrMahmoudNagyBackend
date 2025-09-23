@@ -60,7 +60,7 @@ router.post("/register", async (req, res) => {
     const user = new User({
       name,
       email,
-      password,
+      password: password ? await bcrypt.hash(password, 10) : null,  // <-- hash here
       role,
       studentPhone: role === "student" ? studentPhone : undefined,
       parentName: role === "student" ? parentName : undefined,
@@ -85,8 +85,6 @@ router.post("/register", async (req, res) => {
     res.status(500).json({ msg: "❌ Error registering user", error: err.message });
   }
 });
-
-
 
 
 // Login
