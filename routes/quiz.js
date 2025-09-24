@@ -32,14 +32,28 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ msg: "❌ Teacher not found" });
     }
 
+    // ✅ Convert start and end times to UTC
+    let utcStart = null;
+    let utcEnd = null;
+
+    if (startTime) {
+      const localStart = new Date(startTime);
+      utcStart = new Date(localStart.getTime() - localStart.getTimezoneOffset() * 60000);
+    }
+
+    if (endTime) {
+      const localEnd = new Date(endTime);
+      utcEnd = new Date(localEnd.getTime() - localEnd.getTimezoneOffset() * 60000);
+    }
+
     const quiz = new Quiz({
       title,
       teacherId,
       groups,
       duration,
       questions: questions || [],
-      startTime,
-      endTime,
+      startTime: utcStart,
+      endTime: utcEnd,
     });
 
     await quiz.save();
