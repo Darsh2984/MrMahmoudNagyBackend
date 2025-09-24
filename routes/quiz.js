@@ -20,33 +20,34 @@ const router = express.Router();
 
   // ---------------- CREATE QUIZ ----------------
   router.post("/", async (req, res) => {
-    try {
-      let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
+  try {
+    let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
 
-      if (!title || !teacherId || !groups?.length || !duration) {
-        return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
-      }
+    if (!title || !teacherId || !groups?.length || !duration) {
+      return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
+    }
 
-      teacherId = await resolveTeacherId(teacherId);
-      if (!teacherId) {
-        return res.status(404).json({ msg: "❌ Teacher not found" });
-      }
+    teacherId = await resolveTeacherId(teacherId);
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+    }
 
-      // ✅ Convert to UTC properly
-      const toUTC = (dateString) => {
-        if (!dateString) return null;
-        const localDate = new Date(dateString);
-        return new Date(localDate.getTime() + localDate.getTimezoneOffset() * 60000);
-      };
+    // ✅ Convert to UTC properly
+    const toUTC = (dateString) => {
+      if (!dateString) return null;
+      const localDate = new Date(dateString);
+      return new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000); 
+      // ⬆️ this stores correctly in UTC
+    };
 
-      const quiz = new Quiz({
-        title,
-        teacherId,
-        groups,
-        duration,
-        questions: questions || [],
-        startTime: startTime ? new Date(startTime) : null,
-        endTime: endTime ? new Date(endTime) : null,
+    const quiz = new Quiz({
+      title,
+      teacherId,
+      groups,
+      duration,
+      questions: questions || [],
+      startTime: toUTC(startTime),
+      endTime: toUTC(endTime),
     });
 
     await quiz.save();
@@ -55,7 +56,8 @@ const router = express.Router();
     console.error("❌ Error creating quiz:", err);
     res.status(500).json({ msg: "❌ Failed to create quiz", error: err.message });
   }
-  });
+});
+
 
 // ---------------- GET ALL QUIZZES FOR TEACHER ----------------
 router.get("/teacher/:teacherId", async (req, res) => {
