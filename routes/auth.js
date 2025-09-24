@@ -60,7 +60,7 @@ router.post("/register", async (req, res) => {
     const user = new User({
       name,
       email,
-      password: password ? await bcrypt.hash(password, 10) : null,  // <-- hash here
+      password: password || null,  // ❌ don't hash manually, let pre-save hook handle it
       role,
       studentPhone: role === "student" ? studentPhone : undefined,
       parentName: role === "student" ? parentName : undefined,
@@ -203,7 +203,7 @@ router.post("/teacher/add-assistant", async (req, res) => {
     const assistant = new User({
       name: name.trim(),
       email: email.toLowerCase().trim(),
-      password: hashed,
+      password: password,       // ❌ no hashing here
       role: "teacher",
       assistantOf: teacherId, // links assistant to teacher
     });
