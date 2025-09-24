@@ -7,53 +7,46 @@ const User = require("../models/User");
 const router = express.Router();
 
 // ----------------- Helper: Resolve Teacher ID -----------------
-async function resolveTeacherId(teacherId) {
-  const user = await User.findById(teacherId);
-  if (!user) return null;
+  async function resolveTeacherId(teacherId) {
+    const user = await User.findById(teacherId);
+    if (!user) return null;
 
-  // If assistant → map to real teacher
-  if (user.assistantOf) {
-    return user.assistantOf;
+    // If assistant → map to real teacher
+    if (user.assistantOf) {
+      return user.assistantOf;
+    }
+    return user._id;
   }
-  return user._id;
-}
 
-// ---------------- CREATE QUIZ ----------------
-router.post("/", async (req, res) => {
-  try {
-    let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
+  // ---------------- CREATE QUIZ ----------------
+  router.post("/", async (req, res) => {
+    try {
+      let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
 
-    if (!title || !teacherId || !groups?.length || !duration) {
-      return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
-    }
+      if (!title || !teacherId || !groups?.length || !duration) {
+        return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
+      }
 
-    teacherId = await resolveTeacherId(teacherId);
-    if (!teacherId) {
-      return res.status(404).json({ msg: "❌ Teacher not found" });
-    }
+      teacherId = await resolveTeacherId(teacherId);
+      if (!teacherId) {
+        return res.status(404).json({ msg: "❌ Teacher not found" });
+      }
 
-    // ✅ Convert start and end times to UTC
-    let utcStart = null;
-    let utcEnd = null;
+      // ✅ Convert to UTC properly
+      const toUTC = (dateString) => {
+        if (!dateString) return null;
+        const localDate = new Date(dateString);
+        return new Date(localDate.getTime() + localDate.getTimezoneOffset() * 60000);
+      };
 
-    if (startTime) {
-      const localStart = new Date(startTime);
-      utcStart = new Date(localStart.getTime() - localStart.getTimezoneOffset() * 60000);
-    }
-
-    if (endTime) {
-      const localEnd = new Date(endTime);
-      utcEnd = new Date(localEnd.getTime() - localEnd.getTimezoneOffset() * 60000);
-    }
-
-    const quiz = new Quiz({
-      title,
-      teacherId,
-      groups,
-      duration,
-      questions: questions || [],
-      startTime: utcStart,
-      endTime: utcEnd,
+      const quiz = new Quiz({
+        title,
+        teacherId,
+        groups,
+        duration,
+        questions: questions || [],
+        startTime: startTime ? new Date(startTime) : null,
+        endTime: endTime ? new Date(endTime) : null,
     });
 
     await quiz.save();
@@ -62,7 +55,7 @@ router.post("/", async (req, res) => {
     console.error("❌ Error creating quiz:", err);
     res.status(500).json({ msg: "❌ Failed to create quiz", error: err.message });
   }
-});
+  });
 
 // ---------------- GET ALL QUIZZES FOR TEACHER ----------------
 router.get("/teacher/:teacherId", async (req, res) => {

@@ -146,7 +146,7 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
 
 
 
-// ----------------- Get Student Performance -----------------
+// ----------------- Get Student Performance for teacher -----------------
 router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
   try {
     let { groupId, studentId, teacherId } = req.params;
@@ -213,5 +213,213 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
     res.status(500).json({ msg: "❌ Failed to fetch performance", error: err.message });
   }
 });
+
+// ✅ Student Performance (no need to pass teacherId from frontend) for student call
+router.get("/student/:studentId", async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    // 1. Find the student and their group
+    const student = await User.findById(studentId)
+      .populate("groupId")
+      .populate("yearId");
+    if (!student || !student.groupId) {
+      return res.status(400).json({ msg: "❌ Student not assigned to a group" });
+    }
+
+    const groupId = student.groupId._id;
+
+    // 2. Resolve teacherId
+    let teacherId = null;
+
+    // If Group model has teacherId
+    if (student.groupId.teacherId) {
+      teacherId = student.groupId.teacherId;
+    }
+
+    // Fallback → use year’s teacherId (if stored there)
+    if (!teacherId && student.yearId?.teacherId) {
+      teacherId = student.yearId.teacherId;
+    }
+
+    // Last fallback → use realTeacherId (from login assignment)
+    if (!teacherId && student.realTeacherId) {
+      teacherId = student.realTeacherId;
+    }
+
+    if (!teacherId) {
+      return res.status(404).json({ msg: "❌ Could not resolve teacher for this student" });
+    }
+
+    // 3. Attendance
+    const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
+    const attendance = sessions.map((s) => {
+      const studentAttendance = s.attendance.find(
+        (a) => a.studentId._id.toString() === studentId
+      );
+      return {
+        date: s.createdAt,
+        title: s.title,
+        present: studentAttendance?.status === "Present",
+      };
+    });
+
+    // 4. Tasks
+    const tasks = await Task.find({ groups: groupId, teacherId });
+    const submissions = await Submission.find({
+      studentId,
+      taskId: { $in: tasks.map((t) => t._id) },
+    });
+    const taskStatus = tasks.map((t) => ({
+      _id: t._id,
+      title: t.title,
+      submitted: submissions.some((s) => s.taskId.toString() === t._id.toString()),
+    }));
+
+    // 5. Quizzes
+    const quizzes = await Quiz.find({ groups: groupId, teacherId }).populate("questions");
+    const quizSubmissions = await QuizSubmission.find({
+      studentId,
+      quizId: { $in: quizzes.map((q) => q._id) },
+    }).populate("quizId", "title");
+
+    const quizGrades = quizzes.map((q) => {
+      const submission = quizSubmissions.find(
+        (s) => s.quizId._id.toString() === q._id.toString()
+      );
+      return {
+        quizTitle: q.title,
+        score: submission ? submission.score : null,
+        total: q.questions.length,
+      };
+    });
+
+    // ✅ Final response
+    res.json({
+      attendance,
+      tasks: taskStatus,
+      quizzes: quizGrades,
+    });
+  } catch (err) {
+    console.error("❌ Error fetching student performance:", err);
+    res.status(500).json({ msg: "❌ Failed to fetch performance", error: err.message });
+  }
+});
+
+// ✅ Parent → Fetch performance for all children
+router.get("/parent/:parentId", async (req, res) => {
+  try {
+    const { parentId } = req.params;
+
+    // 1. Find parent with children
+    const parent = await User.findById(parentId)
+      .populate("children")
+      .populate({
+        path: "children",
+        populate: [{ path: "groupId" }, { path: "yearId" }],
+      });
+
+    if (!parent || parent.role !== "parent") {
+      return res.status(404).json({ msg: "❌ Parent not found" });
+    }
+
+    // 2. For each child, reuse the student performance logic
+    const childrenPerformance = await Promise.all(
+      parent.children.map(async (child) => {
+        if (!child.groupId) {
+          return {
+            childId: child._id,
+            childName: child.name,
+            msg: "❌ Not assigned to a group",
+          };
+        }
+
+        const groupId = child.groupId._id;
+
+        // 🔹 Resolve teacherId (same as student route)
+        let teacherId = null;
+        if (child.groupId.teacherId) {
+          teacherId = child.groupId.teacherId;
+        }
+        if (!teacherId && child.yearId?.teacherId) {
+          teacherId = child.yearId.teacherId;
+        }
+        if (!teacherId && child.realTeacherId) {
+          teacherId = child.realTeacherId;
+        }
+
+        if (!teacherId) {
+          return {
+            childId: child._id,
+            childName: child.name,
+            msg: "❌ Could not resolve teacher for this student",
+          };
+        }
+
+        // Attendance
+        const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
+        const attendance = sessions.map((s) => {
+          const studentAttendance = s.attendance.find(
+            (a) => a.studentId._id.toString() === child._id.toString()
+          );
+          return {
+            date: s.createdAt,
+            title: s.title,
+            present: studentAttendance?.status === "Present",
+          };
+        });
+
+        // Tasks
+        const tasks = await Task.find({ groups: groupId, teacherId });
+        const submissions = await Submission.find({
+          studentId: child._id,
+          taskId: { $in: tasks.map((t) => t._id) },
+        });
+        const taskStatus = tasks.map((t) => ({
+          _id: t._id,
+          title: t.title,
+          submitted: submissions.some(
+            (s) => s.taskId.toString() === t._id.toString()
+          ),
+        }));
+
+        // Quizzes
+        const quizzes = await Quiz.find({ groups: groupId, teacherId }).populate("questions");
+        const quizSubmissions = await QuizSubmission.find({
+          studentId: child._id,
+          quizId: { $in: quizzes.map((q) => q._id) },
+        }).populate("quizId", "title");
+
+        const quizGrades = quizzes.map((q) => {
+          const submission = quizSubmissions.find(
+            (s) => s.quizId._id.toString() === q._id.toString()
+          );
+          return {
+            quizTitle: q.title,
+            score: submission ? submission.score : null,
+            total: q.questions.length,
+          };
+        });
+
+        return {
+          childId: child._id,
+          childName: child.name,
+          attendance,
+          tasks: taskStatus,
+          quizzes: quizGrades,
+        };
+      })
+    );
+
+    res.json(childrenPerformance);
+  } catch (err) {
+    console.error("❌ Error fetching parent performance:", err);
+    res
+      .status(500)
+      .json({ msg: "❌ Failed to fetch parent performance", error: err.message });
+  }
+});
+
+
 
 module.exports = router;
