@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const School = require("../models/School");
 const User = require("../models/User");
+const Session = require("../models/Session");
+
 
 // ----------------- Helper: Resolve Teacher ID -----------------
 async function resolveTeacherId(teacherId) {
@@ -58,6 +60,22 @@ router.get("/:teacherId", async (req, res) => {
     res.json(schools);
   } catch (err) {
     res.status(500).json({ msg: "❌ Error fetching schools", error: err.message });
+  }
+});
+
+// Get all sessions for a specific group
+router.get("/group/:groupId", async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const sessions = await Session.find({ groupId })
+      .populate("attendance.studentId", "name email") // optional: populate student info
+      .sort({ createdAt: -1 });
+
+    res.json(sessions);
+  } catch (err) {
+    console.error("❌ Error fetching sessions:", err);
+    res.status(500).json({ msg: "❌ Failed to fetch sessions", error: err.message });
   }
 });
 
