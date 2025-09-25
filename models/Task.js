@@ -8,6 +8,6 @@ const taskSchema = new mongoose.Schema({
   groups: [{ type: mongoose.Schema.Types.ObjectId, ref: "Group", required: true }], // ✅ array of groups
   deadline: { type: Date, required: true },
   gradeOutOf: { type: Number, required: true },
-});
+}); 
 
 module.exports = mongoose.model("Task", taskSchema);

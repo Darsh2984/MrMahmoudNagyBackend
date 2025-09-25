@@ -48,7 +48,7 @@ router.post("/task", async (req, res) => {
       teacherId,
       yearId,
       groups,
-      deadline: new Date(deadline), // stored in UTC
+      deadline: deadline ? new Date(deadline) : null, // always stored as UTC
       gradeOutOf,
     });
 

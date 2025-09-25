@@ -46,8 +46,8 @@ const router = express.Router();
       groups,
       duration,
       questions: questions || [],
-      startTime: toUTC(startTime),
-      endTime: toUTC(endTime),
+      startTime: startTime ? new Date(startTime) : null,
+      endTime: endTime ? new Date(endTime) : null,  
     });
 
     await quiz.save();
