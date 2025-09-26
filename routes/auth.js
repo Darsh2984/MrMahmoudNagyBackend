@@ -355,6 +355,13 @@ router.get("/validate/:id", async (req, res) => {
     if (user.role === "student") {
       const group = await Group.findOne({ students: user._id }).select("_id");
       groupId = group?._id || null;
+
+      // 🚨 If no group, deny access
+      if (!groupId) {
+        return res
+          .status(403)
+          .json({ msg: "Student has no group, pending access" });
+      }
     }
 
     res.json({
