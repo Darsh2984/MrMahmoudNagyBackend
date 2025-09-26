@@ -3,6 +3,8 @@ const Quiz = require("../models/Quiz");
 const Group = require("../models/Group");
 const QuizSubmission = require("../models/QuizSubmission");
 const User = require("../models/User");
+const { sendMessage } = require("../utils/wapilot");
+const transporter = require("../config/nodemailer");
 
 const router = express.Router();
 
@@ -51,6 +53,34 @@ const router = express.Router();
     });
 
     await quiz.save();
+    const teacherLocalStart = new Date(startTime);
+    const students = await User.find({ role: "student", groupId: { $in: groups } })
+      .select("name email studentPhone parentPhone parentId")
+      .populate("parentId", "name email parentPhone");
+
+    for (const student of students) {
+      const msg = `📝 New Quiz Assigned\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB")}\nDuration: ${duration} mins`;
+
+      // WhatsApp student
+      if (student.studentPhone) {
+        try {
+          await sendMessage(`${student.studentPhone}@c.us`, msg);
+        } catch (err) {
+          console.warn(`⚠️ Failed to send WhatsApp to ${student.name}:`, err.message);
+        }
+      }
+
+      // WhatsApp parent
+      const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+      if (parentPhone) {
+        try {
+          await sendMessage(`${parentPhone}@c.us`, `📢 Your child ${student.name} has a new quiz.\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB")}\nDuration: ${duration} mins`);
+        } catch (err) {
+          console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
+        }
+      }
+    }
+
     res.json(quiz);
   } catch (err) {
     console.error("❌ Error creating quiz:", err);

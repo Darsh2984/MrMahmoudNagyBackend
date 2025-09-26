@@ -21,6 +21,8 @@ const testRoutes = require("./routes/test");
 
 app.use(cors());
 app.use(express.json());
+// server.js
+require("./cron/deadlineNotifier"); // ✅ starts cron job
 
 // DB connect
 mongoose.connect(process.env.MONGO_URI)

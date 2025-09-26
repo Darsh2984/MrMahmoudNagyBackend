@@ -3,6 +3,8 @@ const Quiz = require("../models/Quiz");
 const User = require("../models/User");
 const QuizSubmission = require("../models/QuizSubmission");
 const Group = require("../models/Group");
+const { sendMessage } = require("../utils/wapilot");
+
 
 const router = express.Router();
 
@@ -86,7 +88,38 @@ router.post("/:quizId/submit", async (req, res) => {
     });
 
     await submission.save();
-    res.json({ msg: "✅ Quiz submitted", score, total: quiz.questions.length });
+
+    // ✅ Fetch student + parent
+    const student = await User.findById(studentId)
+      .select("name studentPhone parentPhone parentId")
+      .populate("parentId", "name parentPhone");
+
+    const total = quiz.questions.length;
+    const studentMsg = `✅ Quiz Finished!\n\nTitle: ${quiz.title}\nScore: ${score}/${total}`;
+    const parentMsg = `📢 Your child ${student.name} finished the quiz "${quiz.title}"\nScore: ${score}/${total}`;
+
+    // 🔹 WhatsApp student
+    if (student.studentPhone) {
+      try {
+        await sendMessage(`${student.studentPhone}@c.us`, studentMsg);
+        console.log(`✅ WhatsApp sent to student ${student.name}`);
+      } catch (err) {
+        console.warn(`⚠️ Failed to send WhatsApp to student ${student.name}:`, err.message);
+      }
+    }
+
+    // 🔹 WhatsApp parent
+    const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+    if (parentPhone) {
+      try {
+        await sendMessage(`${parentPhone}@c.us`, parentMsg);
+        console.log(`✅ WhatsApp sent to parent of ${student.name}`);
+      } catch (err) {
+        console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
+      }
+    }
+
+    res.json({ msg: "✅ Quiz submitted", score, total });
   } catch (err) {
     console.error("❌ Error submitting quiz:", err);
     res.status(500).json({ msg: "Failed to submit quiz" });
