@@ -19,13 +19,6 @@ const adminRoutes = require("./routes/admin");
 const studentRoutes = require("./routes/students");
 const testRoutes = require("./routes/test");
 
-
-
-
-
-
-
-
 app.use(cors());
 app.use(express.json());
 
