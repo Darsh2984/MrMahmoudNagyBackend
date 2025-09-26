@@ -17,6 +17,8 @@ const materialRoutes = require("./routes/material");
 const schoolRoutes = require("./routes/school");
 const adminRoutes = require("./routes/admin");
 const studentRoutes = require("./routes/students");
+const testRoutes = require("./routes/test");
+
 
 
 
@@ -49,6 +51,8 @@ app.use("/api/material", materialRoutes);
 app.use("/api/school",schoolRoutes );
 app.use("/api/admin", adminRoutes);
 app.use("/api/students", studentRoutes);
+app.use("/api", testRoutes);
+
 
 
 
