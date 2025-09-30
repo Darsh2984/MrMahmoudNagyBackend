@@ -195,4 +195,38 @@ router.get("/student/:studentId/year", async (req, res) => {
   }
 });
 
+
+// Update entire list of zoom links for a year
+router.put("/year/:yearId/zoom", async (req, res) => {
+  try {
+    const { yearId } = req.params;
+    const { zoomLinks } = req.body; // array of {title, link}
+
+    const year = await Year.findByIdAndUpdate(
+      yearId,
+      { zoomLinks },
+      { new: true }
+    );
+
+    if (!year) return res.status(404).json({ msg: "❌ Year not found" });
+    res.json(year);
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error updating Zoom links", error: err.message });
+  }
+});
+
+// GET – fetch zoom links
+router.get("/year/:yearId/zoom", async (req, res) => {
+  try {
+    const { yearId } = req.params;
+    const year = await Year.findById(yearId);
+
+    if (!year) return res.status(404).json({ msg: "❌ Year not found" });
+    res.json({ zoomLinks: year.zoomLinks || [] });
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error fetching Zoom links", error: err.message });
+  }
+});
+
+
 module.exports = router;
