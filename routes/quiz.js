@@ -59,7 +59,7 @@ const router = express.Router();
       .populate("parentId", "name email parentPhone");
 
     for (const student of students) {
-      const msg = `📝 New Quiz Assigned\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB")}\nDuration: ${duration} mins`;
+      const msg = `📝 New Quiz Assigned\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB", { timeZone: "Africa/Cairo" })} (Cairo Local Time)\nDuration: ${duration} mins`;
 
       // WhatsApp student
       if (student.studentPhone) {
@@ -74,7 +74,9 @@ const router = express.Router();
       const parentPhone = student.parentPhone || student.parentId?.parentPhone;
       if (parentPhone) {
         try {
-          await sendMessage(`${parentPhone}@c.us`, `📢 Your child ${student.name} has a new quiz.\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB")}\nDuration: ${duration} mins`);
+          await sendMessage(`${parentPhone}@c.us`,
+            `📢 Your child ${student.name} has a new quiz.\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB", { timeZone: "Africa/Cairo" })} (Cairo Local Time)\nDuration: ${duration} mins`
+          );
         } catch (err) {
           console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
         }
