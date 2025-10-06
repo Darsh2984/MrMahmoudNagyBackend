@@ -257,7 +257,7 @@ router.put("/submission/:submissionId/grade", uploadCorrected.single("file"), as
         maxBodyLength: Infinity,
       });
 
-      updateData.correctedFileUrl = `https://layth-eg.b-cdn.net${path}`;
+      updateData.correctedFileUrl = `https://layth-eg.b-cdn.net/${path}`;
     }
 
     const updated = await Submission.findByIdAndUpdate(req.params.submissionId, updateData, { new: true });
