@@ -18,6 +18,8 @@ const schoolRoutes = require("./routes/school");
 const adminRoutes = require("./routes/admin");
 const studentRoutes = require("./routes/students");
 const testRoutes = require("./routes/test");
+const inClassQuizRoutes = require("./routes/inClassQuiz.js") ;
+
 
 app.use(cors());
 app.use(express.json());
@@ -47,6 +49,8 @@ app.use("/api/school",schoolRoutes );
 app.use("/api/admin", adminRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api", testRoutes);
+app.use("/api/inclassquiz", inClassQuizRoutes);
+
 
 
 
