@@ -163,7 +163,7 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
     const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
     const attendance = sessions.map((s) => {
       const studentAttendance = s.attendance.find(
-        (a) => a.studentId._id.toString() === studentId
+        (a) => a.studentId && a.studentId._id.toString() === studentId
       );
       return {
         date: s.createdAt,
