@@ -88,14 +88,11 @@ router.get("/group/:yearId", async (req, res) => {
   }
 });
 
-// ✅ Add multiple students to a group
 // ✅ Add multiple students to a group + send WhatsApp messages
 router.post("/group/:groupId/add-student", async (req, res) => {
   try {
     const { studentIds } = req.body; // expects array of student IDs
-    const group = await Group.findById(req.params.groupId)
-      .populate("yearId")
-      .populate("teacherId", "name"); // optional: if you want teacher name in message
+    const group = await Group.findById(req.params.groupId).populate("yearId"); // ✅ removed teacherId
 
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
 
@@ -129,8 +126,7 @@ router.post("/group/:groupId/add-student", async (req, res) => {
         .populate("parentId", "name parentPhone");
 
       if (student) {
-        const teacherName = group.teacherId?.name || "your teacher";
-        const welcomeMsg = `🎉 Welcome to our course!\n\nHello ${student.name},\nYou have now been added to your class group for this academic year.\n\nYou now have approved access to our platform and can explore all materials and updates.\n\n🌐 Visit: Layth-eg.com\n\nWishing you a happy and successful year ahead!\n- ${teacherName}`;
+        const welcomeMsg = `🎉 Welcome to our course!\n\nHello ${student.name},\nYou have now been added to your class group for this academic year.\n\nYou now have approved access to our platform and can explore all materials and updates.\n\n🌐 Visit: Layth-eg.com\n\nWishing you a happy and successful year ahead!`;
 
         const parentMsg = `📢 Dear Parent,\nYour child ${student.name} has now joined the course on Layth-eg.com.\nThey have full access to course materials and updates.\n\nWe wish them a productive and successful academic year!`;
 
