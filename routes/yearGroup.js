@@ -3,6 +3,8 @@ const router = express.Router();
 const Year = require("../models/Year");
 const Group = require("../models/Group");
 const User = require("../models/User");
+const { sendMessage } = require("../utils/wapilot");
+
 
 // ----------------- Helper: Resolve Teacher ID -----------------
 async function resolveTeacherId(teacherId) {
@@ -87,10 +89,13 @@ router.get("/group/:yearId", async (req, res) => {
 });
 
 // ✅ Add multiple students to a group
+// ✅ Add multiple students to a group + send WhatsApp messages
 router.post("/group/:groupId/add-student", async (req, res) => {
   try {
     const { studentIds } = req.body; // expects array of student IDs
-    const group = await Group.findById(req.params.groupId).populate("yearId");
+    const group = await Group.findById(req.params.groupId)
+      .populate("yearId")
+      .populate("teacherId", "name"); // optional: if you want teacher name in message
 
     if (!group) return res.status(404).json({ msg: "❌ Group not found" });
 
@@ -102,21 +107,54 @@ router.post("/group/:groupId/add-student", async (req, res) => {
     let skippedStudents = [];
 
     for (const studentId of studentIds) {
-      // check if student already belongs to another group
+      // Check if student already belongs to another group
       const existingGroup = await Group.findOne({ students: studentId });
       if (existingGroup) {
         skippedStudents.push(studentId);
         continue;
       }
 
-      // Add student to group
+      // ✅ Add student to group
       group.students.push(studentId);
 
-      // Update student with groupId + yearId
+      // ✅ Update student's group and year
       await User.findByIdAndUpdate(studentId, {
         groupId: group._id,
         yearId: group.yearId,
       });
+
+      // ✅ Fetch student and parent info
+      const student = await User.findById(studentId)
+        .select("name studentPhone parentPhone parentId")
+        .populate("parentId", "name parentPhone");
+
+      if (student) {
+        const teacherName = group.teacherId?.name || "your teacher";
+        const welcomeMsg = `🎉 Welcome to our course!\n\nHello ${student.name},\nYou have now been added to your class group for this academic year.\n\nYou now have approved access to our platform and can explore all materials and updates.\n\n🌐 Visit: Layth-eg.com\n\nWishing you a happy and successful year ahead!\n- ${teacherName}`;
+
+        const parentMsg = `📢 Dear Parent,\nYour child ${student.name} has now joined the course on Layth-eg.com.\nThey have full access to course materials and updates.\n\nWe wish them a productive and successful academic year!`;
+
+        // 🔹 Send to student
+        if (student.studentPhone) {
+          try {
+            await sendMessage(`${student.studentPhone}@c.us`, welcomeMsg);
+            console.log(`✅ WhatsApp sent to student ${student.name}`);
+          } catch (err) {
+            console.warn(`⚠️ Failed to send WhatsApp to student ${student.name}:`, err.message);
+          }
+        }
+
+        // 🔹 Send to parent
+        const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+        if (parentPhone) {
+          try {
+            await sendMessage(`${parentPhone}@c.us`, parentMsg);
+            console.log(`✅ WhatsApp sent to parent of ${student.name}`);
+          } catch (err) {
+            console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
+          }
+        }
+      }
 
       addedStudents.push(studentId);
     }
@@ -124,7 +162,7 @@ router.post("/group/:groupId/add-student", async (req, res) => {
     await group.save();
 
     res.json({
-      msg: "✅ Students processed",
+      msg: "✅ Students processed and messages sent",
       groupId: group._id,
       yearId: group.yearId,
       addedStudents,
