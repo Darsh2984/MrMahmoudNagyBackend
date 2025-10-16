@@ -8,6 +8,8 @@ const Quiz = require("../models/Quiz");
 const QuizSubmission = require("../models/QuizSubmission");
 const Group = require("../models/Group");
 const User = require("../models/User");
+const InClassQuiz = require("../models/InClassQuiz");
+
 
 // ----------------- Helper: Resolve Teacher ID -----------------
 async function resolveTeacherId(teacherId) {
@@ -155,6 +157,9 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
     }
 
     teacherId = await resolveTeacherId(teacherId);
+    // 🔹 Fetch all assistants working under this teacher
+    const assistants = await User.find({ assistantOf: teacherId }).select("_id");
+    const assistantIds = assistants.map(a => a._id);
     if (!teacherId) {
       return res.status(404).json({ msg: "❌ Teacher not found" });
     }
@@ -202,10 +207,33 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
       };
     });
 
+    const inClassQuizzes = await InClassQuiz.find({
+      groupId,
+      teacherId: { $in: [teacherId, ...assistantIds] },
+    }).populate("studentGrades.studentId", "name");
+
+    const inClassGrades = inClassQuizzes.map((iq) => {
+      const studentGrade = iq.studentGrades.find((g) => {
+        const id =
+          typeof g.studentId === "object"
+            ? g.studentId?._id?.toString()
+            : g.studentId?.toString();
+        return id === studentId;
+      });
+
+      return {
+        quizName: iq.quizName,
+        score: studentGrade?.grade ?? null,
+        total: iq.gradeOutOf,
+        date: iq.date,
+      };
+    });
+
     res.json({
       attendance,
       tasks: taskStatus,
       quizzes: quizGrades,
+      inClassQuizzes: inClassGrades,
     });
   } catch (err) {
     console.error("❌ Error fetching performance:", err);
@@ -230,25 +258,17 @@ router.get("/student/:studentId", async (req, res) => {
 
     // 2. Resolve teacherId
     let teacherId = null;
-
-    // If Group model has teacherId
-    if (student.groupId.teacherId) {
-      teacherId = student.groupId.teacherId;
-    }
-
-    // Fallback → use year’s teacherId (if stored there)
-    if (!teacherId && student.yearId?.teacherId) {
-      teacherId = student.yearId.teacherId;
-    }
-
-    // Last fallback → use realTeacherId (from login assignment)
-    if (!teacherId && student.realTeacherId) {
-      teacherId = student.realTeacherId;
-    }
+    if (student.groupId.teacherId) teacherId = student.groupId.teacherId;
+    if (!teacherId && student.yearId?.teacherId) teacherId = student.yearId.teacherId;
+    if (!teacherId && student.realTeacherId) teacherId = student.realTeacherId;
 
     if (!teacherId) {
       return res.status(404).json({ msg: "❌ Could not resolve teacher for this student" });
     }
+
+    // 🔹 Fetch assistants of this teacher
+    const assistants = await User.find({ assistantOf: teacherId }).select("_id");
+    const assistantIds = assistants.map(a => a._id);
 
     // 3. Attendance
     const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
@@ -293,11 +313,35 @@ router.get("/student/:studentId", async (req, res) => {
       };
     });
 
+    // 6. In-Class Quizzes (include assistant-created)
+    const inClassQuizzes = await InClassQuiz.find({
+      groupId,
+      teacherId: { $in: [teacherId, ...assistantIds] },
+    }).populate("studentGrades.studentId", "name");
+
+    const inClassGrades = inClassQuizzes.map((iq) => {
+      const studentGrade = iq.studentGrades.find((g) => {
+        const id =
+          typeof g.studentId === "object"
+            ? g.studentId?._id?.toString()
+            : g.studentId?.toString();
+        return id === studentId;
+      });
+
+      return {
+        quizName: iq.quizName,
+        score: studentGrade?.grade ?? null,
+        total: iq.gradeOutOf,
+        date: iq.date,
+      };
+    });
+
     // ✅ Final response
     res.json({
       attendance,
       tasks: taskStatus,
       quizzes: quizGrades,
+      inClassQuizzes: inClassGrades, // ✅ added
     });
   } catch (err) {
     console.error("❌ Error fetching student performance:", err);
@@ -322,7 +366,7 @@ router.get("/parent/:parentId", async (req, res) => {
       return res.status(404).json({ msg: "❌ Parent not found" });
     }
 
-    // 2. For each child, reuse the student performance logic
+    // 2. For each child, reuse the logic
     const childrenPerformance = await Promise.all(
       parent.children.map(async (child) => {
         if (!child.groupId) {
@@ -335,17 +379,11 @@ router.get("/parent/:parentId", async (req, res) => {
 
         const groupId = child.groupId._id;
 
-        // 🔹 Resolve teacherId (same as student route)
+        // 🔹 Resolve teacherId
         let teacherId = null;
-        if (child.groupId.teacherId) {
-          teacherId = child.groupId.teacherId;
-        }
-        if (!teacherId && child.yearId?.teacherId) {
-          teacherId = child.yearId.teacherId;
-        }
-        if (!teacherId && child.realTeacherId) {
-          teacherId = child.realTeacherId;
-        }
+        if (child.groupId.teacherId) teacherId = child.groupId.teacherId;
+        if (!teacherId && child.yearId?.teacherId) teacherId = child.yearId.teacherId;
+        if (!teacherId && child.realTeacherId) teacherId = child.realTeacherId;
 
         if (!teacherId) {
           return {
@@ -354,6 +392,10 @@ router.get("/parent/:parentId", async (req, res) => {
             msg: "❌ Could not resolve teacher for this student",
           };
         }
+
+        // 🔹 Fetch assistants for this teacher
+        const assistants = await User.find({ assistantOf: teacherId }).select("_id");
+        const assistantIds = assistants.map(a => a._id);
 
         // Attendance
         const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
@@ -377,9 +419,7 @@ router.get("/parent/:parentId", async (req, res) => {
         const taskStatus = tasks.map((t) => ({
           _id: t._id,
           title: t.title,
-          submitted: submissions.some(
-            (s) => s.taskId.toString() === t._id.toString()
-          ),
+          submitted: submissions.some((s) => s.taskId.toString() === t._id.toString()),
         }));
 
         // Quizzes
@@ -400,12 +440,36 @@ router.get("/parent/:parentId", async (req, res) => {
           };
         });
 
+        // 🧩 In-Class Quizzes (include assistant-created)
+        const inClassQuizzes = await InClassQuiz.find({
+          groupId,
+          teacherId: { $in: [teacherId, ...assistantIds] },
+        }).populate("studentGrades.studentId", "name");
+
+        const inClassGrades = inClassQuizzes.map((iq) => {
+          const studentGrade = iq.studentGrades.find((g) => {
+            const id =
+              typeof g.studentId === "object"
+                ? g.studentId?._id?.toString()
+                : g.studentId?.toString();
+            return id === child._id.toString();
+          });
+
+          return {
+            quizName: iq.quizName,
+            score: studentGrade?.grade ?? null,
+            total: iq.gradeOutOf,
+            date: iq.date,
+          };
+        });
+
         return {
           childId: child._id,
           childName: child.name,
           attendance,
           tasks: taskStatus,
           quizzes: quizGrades,
+          inClassQuizzes: inClassGrades, // ✅ added
         };
       })
     );

@@ -110,4 +110,44 @@ router.put("/:quizId/grades", async (req, res) => {
   }
 });
 
+// ✏️ Edit existing In-Class Quiz (update name, date, gradeOutOf, and student grades)
+router.put("/:quizId", async (req, res) => {
+  try {
+    const { quizName, date, gradeOutOf, studentGrades } = req.body;
+
+    const quiz = await InClassQuiz.findById(req.params.quizId);
+    if (!quiz) return res.status(404).json({ msg: "❌ Quiz not found" });
+
+    // ✅ Update main details
+    if (quizName) quiz.quizName = quizName;
+    if (date) quiz.date = new Date(date);
+    if (gradeOutOf) quiz.gradeOutOf = gradeOutOf;
+
+    // ✅ Optionally update student grades if provided
+    if (studentGrades && Array.isArray(studentGrades)) {
+      quiz.studentGrades = studentGrades;
+    }
+
+    await quiz.save();
+
+    res.json({ msg: "✅ Quiz updated successfully", quiz });
+  } catch (err) {
+    console.error("❌ Error updating In-Class Quiz:", err);
+    res.status(500).json({ msg: "❌ Failed to update quiz", error: err.message });
+  }
+});
+
+// 🗑️ Delete In-Class Quiz
+router.delete("/:quizId", async (req, res) => {
+  try {
+    const quiz = await InClassQuiz.findByIdAndDelete(req.params.quizId);
+    if (!quiz) return res.status(404).json({ msg: "❌ Quiz not found" });
+
+    res.json({ msg: "✅ Quiz deleted successfully" });
+  } catch (err) {
+    console.error("❌ Error deleting In-Class Quiz:", err);
+    res.status(500).json({ msg: "❌ Failed to delete quiz", error: err.message });
+  }
+});
+
 module.exports = router;
