@@ -300,4 +300,45 @@ router.delete("/submission/:id", async (req, res) => {
   }
 });
 
+// ----------------- Teacher Marks Student as Submitted -----------------
+router.post("/submission/manual", async (req, res) => {
+  try {
+    const { taskId, studentId, teacherId } = req.body;
+
+    if (!taskId || !studentId || !teacherId)
+      return res.status(400).json({ msg: "❌ Missing data" });
+
+    // Check if already exists
+    const existing = await Submission.findOne({ taskId, studentId });
+    if (existing)
+      return res.status(400).json({ msg: "⚠️ This student already has a submission" });
+
+    // Resolve teacher (handle assistant accounts)
+    const resolvedTeacherId = await resolveTeacherId(teacherId);
+    if (!resolvedTeacherId)
+      return res.status(404).json({ msg: "❌ Teacher not found" });
+
+    // Create manual submission (no file)
+    const submission = new Submission({
+      taskId,
+      studentId,
+      teacherId: resolvedTeacherId,
+      fileUrl: null,
+      grade: null,
+      comments: "Marked as submitted manually by teacher",
+      manual: true, // optional field (you can add to your model)
+      createdAt: new Date(),
+    });
+
+    await submission.save();
+
+    res.json({ msg: "✅ Student marked as submitted", submission });
+  } catch (err) {
+    console.error("❌ Error marking as submitted:", err.message);
+    res.status(500).json({ msg: "❌ Error marking as submitted", error: err.message });
+  }
+}); 
+
+
+
 module.exports = router;
