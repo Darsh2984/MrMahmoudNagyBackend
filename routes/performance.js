@@ -23,6 +23,7 @@ async function resolveTeacherId(teacherId) {
   return user._id; // main teacher
 }
 
+
 // ----------------- Export Group Performance -----------------
 router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
   try {
@@ -33,7 +34,7 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
       return res.status(404).json({ msg: "❌ Teacher not found" });
     }
 
-    // 1. Fetch this group with students
+    // 1. Fetch group with students
     const group = await Group.findById(groupId)
       .populate({
         path: "students",
@@ -43,56 +44,85 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
       return res.status(404).json({ msg: "❌ Group not found" });
     }
 
-    // 2. Get tasks & quizzes for this group
-    const tasks = await Task.find({ groups: groupId, teacherId });
-    const quizzes = await Quiz.find({ groups: groupId, teacherId });
-    const sessions = await Session.find({ groupId, teacherId });
+    // 🧠 Flexible filter — include teacher + assistant creators
+    const assistantDocs = await User.find({ assistantOf: teacherId }).select("_id");
+    const assistantIds = assistantDocs.map((a) => a._id.toString());
 
+    const teacherFilter = [
+      { teacherId },                                 // main teacher
+      { teacherId: req.params.teacherId },           // whoever called (assistant or teacher)
+      { teacherId: { $in: assistantIds } },          // any assistant of this teacher
+    ];
+
+    const [tasks, quizzes, sessions, inClassQuizzes] = await Promise.all([
+      Task.find({ groups: groupId, $or: teacherFilter }),
+      Quiz.find({ groups: groupId, $or: teacherFilter }),
+      Session.find({ groupId, $or: teacherFilter }).sort({ createdAt: 1 }),
+      InClassQuiz.find({ groupId, $or: teacherFilter }).sort({ date: 1 }),
+    ]);
+
+    console.log({
+      tasks: tasks.length,
+      quizzes: quizzes.length,
+      sessions: sessions.length,
+      inClassQuizzes: inClassQuizzes.length,
+    });
     // 3. Create workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet(`${group.name} Performance`);
 
-    // 4. Columns (dynamic task + quiz names)
+    // 4. Dynamic columns
     worksheet.columns = [
       { header: "Student Name", key: "studentName", width: 25 },
       { header: "Student Number", key: "studentPhone", width: 20 },
       { header: "Parent Name", key: "parentName", width: 25 },
       { header: "Parent Phone", key: "parentPhone", width: 20 },
-      { header: "Attendance %", key: "attendance", width: 15 },
+      // Session attendance columns
+      ...sessions.map((s) => ({
+        header: `Session: ${s.title || new Date(s.createdAt).toLocaleDateString()}`,
+        key: `session_${s._id}`,
+        width: 18,
+      })),
+      // Tasks
       ...tasks.map((t) => ({
         header: `Task: ${t.title}`,
         key: `task_${t._id}`,
         width: 25,
       })),
+      // Quizzes
       ...quizzes.map((q) => ({
         header: `Quiz: ${q.title}`,
         key: `quiz_${q._id}`,
         width: 20,
       })),
+      // In-class quizzes
+      ...inClassQuizzes.map((iq) => ({
+        header: `In-Class Quiz: ${iq.quizName}`,
+        key: `inclass_${iq._id}`,
+        width: 20,
+      })),
     ];
 
-    // 5. Add rows for each student
+    // 5. Add rows per student
     for (const student of group.students) {
-      // Attendance %
-      const attended = sessions.filter((s) =>
-        s.attendance.some(
-          (a) =>
-            a.studentId.toString() === student._id.toString() &&
-            a.status === "Present"
-        )
-      ).length;
-      const attendancePct =
-        sessions.length > 0
-          ? ((attended / sessions.length) * 100).toFixed(1) + "%"
-          : "N/A";
-
       const row = {
         studentName: student.name,
         studentPhone: student.studentPhone || "N/A",
         parentName: student.parentId?.name || student.parentName || "N/A",
         parentPhone: student.parentId?.parentPhone || student.parentPhone || "N/A",
-        attendance: attendancePct,
       };
+
+      // Attendance per session
+      for (const s of sessions) {
+        const found = s.attendance?.find(
+          (a) => a.studentId.toString() === student._id.toString()
+        );
+        row[`session_${s._id}`] = found
+          ? found.status === "Present"
+            ? "Present"
+            : "Absent"
+          : "Absent";
+      }
 
       // Task submissions
       for (const t of tasks) {
@@ -113,6 +143,16 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
           submission && submission.score !== null
             ? `${submission.score}/${q.questions.length}`
             : "❌ Not Attempted";
+      }
+
+      // In-Class Quiz grades
+      for (const iq of inClassQuizzes) {
+        const gradeEntry = iq.studentGrades.find(
+          (g) => g.studentId.toString() === student._id.toString()
+        );
+        row[`inclass_${iq._id}`] = gradeEntry
+          ? `${gradeEntry.grade ?? 0}/${iq.gradeOutOf}`
+          : "❌ Not Attempted";
       }
 
       worksheet.addRow(row);
@@ -145,6 +185,7 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
       .json({ msg: "❌ Failed to export group performance", error: err.message });
   }
 });
+
 
 
 // ----------------- Get Student Performance for teacher -----------------
