@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const Quiz = require("../models/Quiz");
 const User = require("../models/User");
 const QuizSubmission = require("../models/QuizSubmission");
@@ -73,12 +74,12 @@ router.get("/:studentId", async (req, res) => {
 // Start a quiz attempt
 router.post("/:quizId/start", async (req, res) => {
   try {
-    const { studentId } = req.body;
-    const quizId = req.params.quizId;
+    const quizId = new mongoose.Types.ObjectId(req.params.quizId);
+    const studentId = new mongoose.Types.ObjectId(req.body.studentId);
 
-    // Prevent duplicate starts
     const existing = await QuizSubmission.findOne({ quizId, studentId });
-    if (existing) return res.status(400).json({ msg: "Quiz already started" });
+    if (existing)
+      return res.status(200).json({ msg: "Quiz already started" });
 
     const submission = new QuizSubmission({
       quizId,
@@ -86,8 +87,9 @@ router.post("/:quizId/start", async (req, res) => {
       score: 0,
       answers: [],
       startedAt: new Date(),
-      isSubmitted: false, // ✅ mark as just started
+      isSubmitted: false,
     });
+
     await submission.save();
     res.json({ msg: "✅ Quiz started", startedAt: submission.startedAt });
   } catch (err) {
@@ -99,13 +101,13 @@ router.post("/:quizId/start", async (req, res) => {
 // ✅ Submit quiz answers
 router.post("/:quizId/submit", async (req, res) => {
   try {
-    const { studentId, answers } = req.body;
-    const quizId = req.params.quizId;
+    const quizId = new mongoose.Types.ObjectId(req.params.quizId);
+    const studentId = new mongoose.Types.ObjectId(req.body.studentId);
+    const { answers } = req.body;
 
     const quiz = await Quiz.findById(quizId).populate("questions");
     if (!quiz) return res.status(404).json({ msg: "❌ Quiz not found" });
 
-    // ✅ Find the existing started submission
     const submission = await QuizSubmission.findOne({ quizId, studentId });
     if (!submission)
       return res.status(404).json({ msg: "❌ Quiz was not started" });
