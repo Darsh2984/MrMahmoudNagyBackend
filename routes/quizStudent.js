@@ -20,7 +20,7 @@ async function resolveTeacherId(teacherId) {
   return user._id;
 }
 
-// 🔹 Get quizzes available for a student + submission status
+// ✅ Get quizzes available for a student + submission status
 router.get("/:studentId", async (req, res) => {
   try {
     const studentId = req.params.studentId;
@@ -28,23 +28,37 @@ router.get("/:studentId", async (req, res) => {
     const groups = await Group.find({ students: studentId }).select("_id");
     const groupIds = groups.map((g) => g._id);
 
-    if (groupIds.length === 0) {
-      return res.json([]); // no groups → no quizzes
-    }
+    if (groupIds.length === 0) return res.json([]); // no groups → no quizzes
 
     const quizzes = await Quiz.find({ groups: { $in: groupIds } })
       .populate("groups", "name")
       .sort({ createdAt: -1 });
 
-    // For each quiz, check if submission exists
     const quizzesWithStatus = await Promise.all(
       quizzes.map(async (quiz) => {
-        const submission = await QuizSubmission.findOne({ quizId: quiz._id, studentId });
+        const submission = await QuizSubmission.findOne({
+          quizId: quiz._id,
+          studentId,
+        });
+
+        let hasStarted = false;
+        let alreadySubmitted = false;
+        let score = null;
+        let total = quiz.questions.length;
+
+        if (submission) {
+          hasStarted = true;
+          alreadySubmitted = submission.isSubmitted;
+          score = submission.score;
+          total = submission.answers.length || total;
+        }
+
         return {
           ...quiz.toObject(),
-          alreadySubmitted: !!submission,
-          score: submission?.score || null,
-          total: submission?.answers.length || quiz.questions.length,
+          hasStarted,
+          alreadySubmitted,
+          score,
+          total,
         };
       })
     );
@@ -56,21 +70,56 @@ router.get("/:studentId", async (req, res) => {
   }
 });
 
-// 2️⃣ Submit quiz answers
+// Start a quiz attempt
+router.post("/:quizId/start", async (req, res) => {
+  try {
+    const { studentId } = req.body;
+    const quizId = req.params.quizId;
+
+    // Prevent duplicate starts
+    const existing = await QuizSubmission.findOne({ quizId, studentId });
+    if (existing) return res.status(400).json({ msg: "Quiz already started" });
+
+    const submission = new QuizSubmission({
+      quizId,
+      studentId,
+      score: 0,
+      answers: [],
+      startedAt: new Date(),
+      isSubmitted: false, // ✅ mark as just started
+    });
+    await submission.save();
+    res.json({ msg: "✅ Quiz started", startedAt: submission.startedAt });
+  } catch (err) {
+    console.error("❌ Error starting quiz:", err);
+    res.status(500).json({ msg: "Failed to start quiz" });
+  }
+});
+
+// ✅ Submit quiz answers
 router.post("/:quizId/submit", async (req, res) => {
   try {
     const { studentId, answers } = req.body;
-    const quiz = await Quiz.findById(req.params.quizId).populate("questions");
+    const quizId = req.params.quizId;
 
-    if (!quiz) return res.status(404).json({ msg: "Quiz not found" });
+    const quiz = await Quiz.findById(quizId).populate("questions");
+    if (!quiz) return res.status(404).json({ msg: "❌ Quiz not found" });
 
-    // prevent double submission
-    const existing = await QuizSubmission.findOne({ quizId: quiz._id, studentId });
-    if (existing) return res.status(400).json({ msg: "Already submitted" });
+    // ✅ Find the existing started submission
+    const submission = await QuizSubmission.findOne({ quizId, studentId });
+    if (!submission)
+      return res.status(404).json({ msg: "❌ Quiz was not started" });
 
+    // ✅ Prevent double submission
+    if (submission.isSubmitted)
+      return res.status(400).json({ msg: "❌ Quiz already submitted" });
+
+    // ✅ Evaluate answers
     let score = 0;
     const evaluatedAnswers = quiz.questions.map((q) => {
-      const studentAnswer = answers.find((a) => a.questionId === q._id.toString());
+      const studentAnswer = answers.find(
+        (a) => a.questionId === q._id.toString()
+      );
       const isCorrect = studentAnswer?.answer === q.correctAnswer;
       if (isCorrect) score++;
       return {
@@ -80,16 +129,15 @@ router.post("/:quizId/submit", async (req, res) => {
       };
     });
 
-    const submission = new QuizSubmission({
-      quizId: quiz._id,
-      studentId,
-      answers: evaluatedAnswers,
-      score,
-    });
+    // ✅ Update existing record
+    submission.answers = evaluatedAnswers;
+    submission.score = score;
+    submission.isSubmitted = true;
+    submission.submittedAt = new Date();
 
     await submission.save();
 
-    // ✅ Fetch student + parent
+    // ✅ Notify student and parent
     const student = await User.findById(studentId)
       .select("name studentPhone parentPhone parentId")
       .populate("parentId", "name parentPhone");
@@ -98,24 +146,24 @@ router.post("/:quizId/submit", async (req, res) => {
     const studentMsg = `✅ Quiz Finished!\n\nTitle: ${quiz.title}\nScore: ${score}/${total}`;
     const parentMsg = `📢 Your child ${student.name} finished the quiz "${quiz.title}"\nScore: ${score}/${total}`;
 
-    // 🔹 WhatsApp student
+    // 🔹 Send WhatsApp to student
     if (student.studentPhone) {
       try {
         await sendMessage(`${student.studentPhone}@c.us`, studentMsg);
         console.log(`✅ WhatsApp sent to student ${student.name}`);
       } catch (err) {
-        console.warn(`⚠️ Failed to send WhatsApp to student ${student.name}:`, err.message);
+        console.warn(`⚠️ Failed to send WhatsApp to student:`, err.message);
       }
     }
 
-    // 🔹 WhatsApp parent
+    // 🔹 Send WhatsApp to parent
     const parentPhone = student.parentPhone || student.parentId?.parentPhone;
     if (parentPhone) {
       try {
         await sendMessage(`${parentPhone}@c.us`, parentMsg);
         console.log(`✅ WhatsApp sent to parent of ${student.name}`);
       } catch (err) {
-        console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
+        console.warn(`⚠️ Failed to send WhatsApp to parent:`, err.message);
       }
     }
 
@@ -126,7 +174,7 @@ router.post("/:quizId/submit", async (req, res) => {
   }
 });
 
-// 3️⃣ Get student submission details
+// Get student submission details
 router.get("/:quizId/submission/:studentId", async (req, res) => {
   try {
     const submission = await QuizSubmission.findOne({

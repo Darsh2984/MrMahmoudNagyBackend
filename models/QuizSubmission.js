@@ -10,8 +10,10 @@ const quizSubmissionSchema = new mongoose.Schema({
       isCorrect: Boolean,
     },
   ],
-  score: { type: Number, required: true },
-  submittedAt: { type: Date, default: Date.now },
+  score: { type: Number, default: 0 },
+  startedAt: { type: Date, default: Date.now },
+  submittedAt: { type: Date },
+  isSubmitted: { type: Boolean, default: false }, // 🔹 NEW FIELD
 });
 
 module.exports = mongoose.model("QuizSubmission", quizSubmissionSchema);
