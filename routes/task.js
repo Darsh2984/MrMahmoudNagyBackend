@@ -36,14 +36,6 @@ router.post("/task", async (req, res) => {
 
     teacherId = await resolveTeacherId(teacherId);
     if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
-
-    // ✅ Convert teacher's local time → UTC before saving
-    let utcDeadline = null;
-    if (deadline) {
-      const localDate = new Date(deadline); // "2025-09-24T23:00" interpreted as local
-      utcDeadline = new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000);
-    }
-
     const task = new Task({
       title,
       description,
@@ -155,7 +147,7 @@ router.put("/task/:id", async (req, res) => {
       {
         title,
         description,
-        deadline: deadline ? new Date(deadline) : undefined, // ✅ store directly
+        deadline: deadline ? new Date(deadline) : null, // ✅ store directly
         gradeOutOf,
       },
       { new: true }
