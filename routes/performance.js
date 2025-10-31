@@ -444,9 +444,14 @@ router.get("/parent/:parentId", async (req, res) => {
 
         // Attendance
         const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
+        // 🔹 Filter out any null attendance records
+        sessions.forEach((s) => {
+          s.attendance = s.attendance.filter((a) => a.studentId); // remove nulls
+        });
+
         const attendance = sessions.map((s) => {
           const studentAttendance = s.attendance.find(
-            (a) => a.studentId._id.toString() === child._id.toString()
+            (a) => a.studentId && a.studentId._id.toString() === child._id.toString()
           );
           return {
             date: s.createdAt,
