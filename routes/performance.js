@@ -206,8 +206,12 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
     }
 
     // Attendance
-    const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
-    const attendance = sessions.map((s) => {
+      const sessions = await Session.find({ groupId, teacherId })
+        .populate("attendance.studentId");
+
+      sessions.forEach((s) => {
+        s.attendance = s.attendance.filter((a) => a.studentId); // remove nulls
+      });    const attendance = sessions.map((s) => {
       const studentAttendance = s.attendance.find(
         (a) => a.studentId && a.studentId._id.toString() === studentId
       );
@@ -315,7 +319,7 @@ router.get("/student/:studentId", async (req, res) => {
     const sessions = await Session.find({ groupId, teacherId }).populate("attendance.studentId");
     const attendance = sessions.map((s) => {
       const studentAttendance = s.attendance.find(
-        (a) => a.studentId._id.toString() === studentId
+        (a) => a.studentId && a.studentId._id.toString() === studentId
       );
       return {
         date: s.createdAt,
