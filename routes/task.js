@@ -37,8 +37,7 @@ router.post("/task", async (req, res) => {
     teacherId = await resolveTeacherId(teacherId);
     if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
-    // ✅ Frontend already sends deadline in UTC (e.g. 2025-10-29T15:00:00.000Z)
-    // So just wrap it in Date() and store as-is.
+    // ✅ Store UTC directly (frontend already sends UTC ISO)
     const task = new Task({
       title,
       description,
@@ -51,99 +50,104 @@ router.post("/task", async (req, res) => {
 
     await task.save();
 
-    // ---------------- Notifications ----------------
-    const utcDeadline = deadline ? new Date(deadline) : null;
+    // ✅ Respond immediately — no waiting for notifications
+    res.json({ msg: "✅ Task created successfully", task });
 
-    // ✅ Convert UTC → Cairo local for message readability
-    const deadlineMsg = utcDeadline
-      ? utcDeadline.toLocaleString("en-GB", { timeZone: "Africa/Cairo" }) + " (Cairo Local Time)"
-      : "No deadline";
-
-    const students = await User.find({ role: "student", groupId: { $in: groups } })
-      .select("name email studentPhone parentPhone parentId")
-      .populate("parentId", "name email parentPhone");
-
-    for (const student of students) {
-      const studentMsg = `📝 New Task Assigned\n\nTitle: ${title}\nDescription: ${
-        description || "No description"
-      }\nDeadline: ${deadlineMsg}\nMarks: Out of ${gradeOutOf}`;
-      const parentMsg = `📢 New Task for Your Child\n\nTitle: ${title}\nDescription: ${
-        description || "No description"
-      }\nDeadline: ${deadlineMsg}\nMarks: Out of ${gradeOutOf}`;
-
-      // 🔹 Email to student
+    // ---------------- BACKGROUND NOTIFICATION TASK ----------------
+    (async () => {
       try {
-        await transporter.sendMail({
-          to: student.email,
-          from: process.env.EMAIL_USER,
-          subject: `📝 New Task Assigned: ${title}`,
-          html: `
-            <h3>New Task Assigned</h3>
-            <p>Hello <b>${student.name}</b>,</p>
-            <ul>
-              <li><b>Title:</b> ${title}</li>
-              <li><b>Description:</b> ${description || "No description"}</li>
-              <li><b>Deadline:</b> ${deadlineMsg}</li>
-              <li><b>Marks:</b> Out of ${gradeOutOf}</li>
-            </ul>
-          `,
-        });
-      } catch (err) {
-        console.warn(`⚠️ Failed to send email to ${student.email}:`, err.message);
-      }
+        const utcDeadline = deadline ? new Date(deadline) : null;
 
-      // 🔹 WhatsApp to student
-      if (student.studentPhone) {
-        try {
-          await sendMessage(`${student.studentPhone}@c.us`, studentMsg);
-          console.log(`✅ WhatsApp sent to student ${student.name}`);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send WhatsApp to student ${student.name}:`, err.message);
+        const deadlineMsg = utcDeadline
+          ? utcDeadline.toLocaleString("en-GB", {
+              timeZone: "Africa/Cairo",
+            }) + " (Cairo Local Time)"
+          : "No deadline";
+
+        const students = await User.find({ role: "student", groupId: { $in: groups } })
+          .select("name email studentPhone parentPhone parentId")
+          .populate("parentId", "name email parentPhone");
+
+        for (const student of students) {
+          const studentMsg = `📝 New Task Assigned\n\nTitle: ${title}\nDescription: ${
+            description || "No description"
+          }\nDeadline: ${deadlineMsg}\nMarks: Out of ${gradeOutOf}`;
+          const parentMsg = `📢 New Task for Your Child\n\nTitle: ${title}\nDescription: ${
+            description || "No description"
+          }\nDeadline: ${deadlineMsg}\nMarks: Out of ${gradeOutOf}`;
+
+          // 🔹 Send Email to Student
+          if (student.email) {
+            transporter
+              .sendMail({
+                to: student.email,
+                from: process.env.EMAIL_USER,
+                subject: `📝 New Task Assigned: ${title}`,
+                html: `
+                  <h3>New Task Assigned</h3>
+                  <p>Hello <b>${student.name}</b>,</p>
+                  <ul>
+                    <li><b>Title:</b> ${title}</li>
+                    <li><b>Description:</b> ${description || "No description"}</li>
+                    <li><b>Deadline:</b> ${deadlineMsg}</li>
+                    <li><b>Marks:</b> Out of ${gradeOutOf}</li>
+                  </ul>
+                `,
+              })
+              .catch((err) =>
+                console.warn(`⚠️ Failed to send email to ${student.email}:`, err.message)
+              );
+          }
+
+          // 🔹 WhatsApp to Student
+          if (student.studentPhone) {
+            sendMessage(`${student.studentPhone}@c.us`, studentMsg).catch((err) =>
+              console.warn(`⚠️ Failed WhatsApp to student ${student.name}:`, err.message)
+            );
+          }
+
+          // 🔹 WhatsApp to Parent
+          const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+          if (parentPhone) {
+            sendMessage(`${parentPhone}@c.us`, parentMsg).catch((err) =>
+              console.warn(`⚠️ Failed WhatsApp to parent of ${student.name}:`, err.message)
+            );
+          }
+
+          // 🔹 Email to Parent
+          if (student.parentId?.email) {
+            transporter
+              .sendMail({
+                to: student.parentId.email,
+                from: process.env.EMAIL_USER,
+                subject: `📢 Your Child Has a New Task: ${title}`,
+                html: `
+                  <h3>New Task Notification</h3>
+                  <p>Hello <b>${student.parentId.name}</b>,</p>
+                  <p>A new task has been assigned to your child <b>${student.name}</b>.</p>
+                  <ul>
+                    <li><b>Title:</b> ${title}</li>
+                    <li><b>Description:</b> ${description || "No description"}</li>
+                    <li><b>Deadline:</b> ${deadlineMsg}</li>
+                    <li><b>Marks:</b> Out of ${gradeOutOf}</li>
+                  </ul>
+                `,
+              })
+              .catch((err) =>
+                console.warn(`⚠️ Failed to send email to parent ${student.parentId.email}:`, err.message)
+              );
+          }
         }
+      } catch (bgErr) {
+        console.error("⚠️ Background notification error:", bgErr.message);
       }
-
-      // 🔹 WhatsApp to parent
-      const parentPhone = student.parentPhone || student.parentId?.parentPhone;
-      if (parentPhone) {
-        try {
-          await sendMessage(`${parentPhone}@c.us`, parentMsg);
-          console.log(`✅ WhatsApp sent to parent of ${student.name}`);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
-        }
-      }
-
-      // 🔹 Email to parent
-      if (student.parentId?.email) {
-        try {
-          await transporter.sendMail({
-            to: student.parentId.email,
-            from: process.env.EMAIL_USER,
-            subject: `📢 Your Child Has a New Task: ${title}`,
-            html: `
-              <h3>New Task Notification</h3>
-              <p>Hello <b>${student.parentId.name}</b>,</p>
-              <p>A new task has been assigned to your child <b>${student.name}</b>. Details:</p>
-              <ul>
-                <li><b>Title:</b> ${title}</li>
-                <li><b>Description:</b> ${description || "No description"}</li>
-                <li><b>Deadline:</b> ${deadlineMsg}</li>
-                <li><b>Marks:</b> Out of ${gradeOutOf}</li>
-              </ul>
-            `,
-          });
-        } catch (err) {
-          console.warn(`⚠️ Failed to send email to parent ${student.parentId.email}:`, err.message);
-        }
-      }
-    }
-
-    res.json({ msg: "✅ Task created and notifications sent", task });
+    })();
   } catch (err) {
     console.error("❌ Error creating task:", err.message);
     res.status(500).json({ msg: "❌ Error creating task", error: err.message });
   }
 });
+
 
 // ----------------- Edit Task -----------------
 router.put("/task/:id", async (req, res) => {

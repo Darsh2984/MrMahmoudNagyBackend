@@ -22,73 +22,77 @@ const router = express.Router();
 
   // ---------------- CREATE QUIZ ----------------
   router.post("/", async (req, res) => {
-  try {
-    let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
+    try {
+      let { title, teacherId, groups, duration, questions, startTime, endTime } = req.body;
 
-    if (!title || !teacherId || !groups?.length || !duration) {
-      return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
-    }
-
-    teacherId = await resolveTeacherId(teacherId);
-    if (!teacherId) {
-      return res.status(404).json({ msg: "❌ Teacher not found" });
-    }
-
-    // ✅ Convert to UTC properly
-    const toUTC = (dateString) => {
-      if (!dateString) return null;
-      const localDate = new Date(dateString);
-      return new Date(localDate.getTime() - localDate.getTimezoneOffset() * 60000); 
-      // ⬆️ this stores correctly in UTC
-    };
-
-    const quiz = new Quiz({
-      title,
-      teacherId,
-      groups,
-      duration,
-      questions: questions || [],
-      startTime: startTime ? new Date(startTime) : null,
-      endTime: endTime ? new Date(endTime) : null,  
-    });
-
-    await quiz.save();
-    const teacherLocalStart = new Date(startTime);
-    const students = await User.find({ role: "student", groupId: { $in: groups } })
-      .select("name email studentPhone parentPhone parentId")
-      .populate("parentId", "name email parentPhone");
-
-    for (const student of students) {
-      const msg = `📝 New Quiz Assigned\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB", { timeZone: "Africa/Cairo" })} (Cairo Local Time)\nDuration: ${duration} mins`;
-
-      // WhatsApp student
-      if (student.studentPhone) {
-        try {
-          await sendMessage(`${student.studentPhone}@c.us`, msg);
-        } catch (err) {
-          console.warn(`⚠️ Failed to send WhatsApp to ${student.name}:`, err.message);
-        }
+      if (!title || !teacherId || !groups?.length || !duration) {
+        return res.status(400).json({ msg: "Title, teacher, groups, and duration are required" });
       }
 
-      // WhatsApp parent
-      const parentPhone = student.parentPhone || student.parentId?.parentPhone;
-      if (parentPhone) {
-        try {
-          await sendMessage(`${parentPhone}@c.us`,
-            `📢 Your child ${student.name} has a new quiz.\n\nTitle: ${title}\nStart Time: ${teacherLocalStart.toLocaleString("en-GB", { timeZone: "Africa/Cairo" })} (Cairo Local Time)\nDuration: ${duration} mins`
-          );
-        } catch (err) {
-          console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message);
-        }
+      teacherId = await resolveTeacherId(teacherId);
+      if (!teacherId) {
+        return res.status(404).json({ msg: "❌ Teacher not found" });
       }
-    }
 
-    res.json(quiz);
-  } catch (err) {
-    console.error("❌ Error creating quiz:", err);
-    res.status(500).json({ msg: "❌ Failed to create quiz", error: err.message });
-  }
-});
+      // ✅ Store UTC directly (frontend already sends in UTC ISO)
+      const quiz = new Quiz({
+        title,
+        teacherId,
+        groups,
+        duration,
+        questions: questions || [],
+        startTime: startTime ? new Date(startTime) : null,
+        endTime: endTime ? new Date(endTime) : null,
+      });
+
+      await quiz.save();
+
+      // ✅ Send response immediately (don't wait for WhatsApp)
+      res.json({ msg: "✅ Quiz created successfully", quiz });
+
+      // ---------------- BACKGROUND NOTIFICATION TASK ----------------
+      (async () => {
+        try {
+          const teacherLocalStart = new Date(startTime);
+          const students = await User.find({ role: "student", groupId: { $in: groups } })
+            .select("name email studentPhone parentPhone parentId")
+            .populate("parentId", "name email parentPhone");
+
+          const formattedStart = teacherLocalStart.toLocaleString("en-GB", {
+            timeZone: "Africa/Cairo",
+          });
+
+          for (const student of students) {
+            const msg = `📝 New Quiz Assigned\n\nTitle: ${title}\nStart Time: ${formattedStart} (Cairo Local Time)\nDuration: ${duration} mins`;
+
+            // WhatsApp student
+            if (student.studentPhone) {
+              sendMessage(`${student.studentPhone}@c.us`, msg).catch((err) =>
+                console.warn(`⚠️ Failed to send WhatsApp to ${student.name}:`, err.message)
+              );
+            }
+
+            // WhatsApp parent
+            const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+            if (parentPhone) {
+              const parentMsg = `📢 Your child ${student.name} has a new quiz.\n\nTitle: ${title}\nStart Time: ${formattedStart} (Cairo Local Time)\nDuration: ${duration} mins`;
+              sendMessage(`${parentPhone}@c.us`, parentMsg).catch((err) =>
+                console.warn(`⚠️ Failed to send WhatsApp to parent of ${student.name}:`, err.message)
+              );
+            }
+          }
+        } catch (bgErr) {
+          console.error("⚠️ Background WhatsApp error:", bgErr.message);
+        }
+      })();
+
+      // ✅ The user gets the quiz creation result instantly.
+    } catch (err) {
+      console.error("❌ Error creating quiz:", err);
+      res.status(500).json({ msg: "❌ Failed to create quiz", error: err.message });
+    }
+  });
+
 
 
 // ---------------- GET ALL QUIZZES FOR TEACHER ----------------
