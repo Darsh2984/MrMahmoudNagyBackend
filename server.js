@@ -19,6 +19,9 @@ const adminRoutes = require("./routes/admin");
 const studentRoutes = require("./routes/students");
 const testRoutes = require("./routes/test");
 const inClassQuizRoutes = require("./routes/inClassQuiz.js") ;
+const videoCheckpointRoutes = require("./routes/videoCheckpoint");
+const quizStopQuestionRoutes = require("./routes/quizStopQuestionRoutes");
+
 
 
 app.use(cors());
@@ -50,17 +53,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api", testRoutes);
 app.use("/api/inclassquiz", inClassQuizRoutes);
-
-
-
-
-
-
-
-
-
-
-
+app.use("/api/videocheckpoint", videoCheckpointRoutes);
+app.use("/api/quizstop", quizStopQuestionRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

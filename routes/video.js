@@ -114,6 +114,7 @@ router.post("/url", async (req, res) => {
 router.get("/year/:yearId", async (req, res) => {
   try {
     const videos = await Video.find({ yearId: req.params.yearId })
+      .populate("yearId", "name") // 🟢 add this line
       .populate("unitId", "name")
       .populate("chapterId", "name")
       .populate("teacherId", "name email")
@@ -121,9 +122,11 @@ router.get("/year/:yearId", async (req, res) => {
 
     res.json(videos);
   } catch (err) {
+    console.error("❌ Error fetching videos:", err.message);
     res.status(500).json({ msg: "❌ Error fetching videos", error: err.message });
   }
 });
+
 
 // ----------------- Delete Video -----------------
 router.delete("/:id", async (req, res) => {

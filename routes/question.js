@@ -106,6 +106,23 @@ router.get("/questions/:teacherId/:yearId", async (req, res) => {
   }
 });
 
+// ---------------- GET QUESTIONS BY UNIT AND YEAR ----------------
+router.get("/questions/unit/:unitId/:yearId", async (req, res) => {
+  try {
+    const { unitId, yearId } = req.params;
+
+    const questions = await Question.find({ unitId, yearId })
+      .populate("yearId", "name")
+      .populate("unitId", "name")
+      .populate("chapterId", "name");
+
+    res.json(questions);
+  } catch (err) {
+    console.error("❌ Error fetching questions by unit:", err.message);
+    res.status(500).json({ msg: "❌ Error fetching questions", error: err.message });
+  }
+});
+
 // ---------------- GET QUESTIONS BY CHAPTER ----------------
 router.get("/questions/chapter/:chapterId", async (req, res) => {
   try {
