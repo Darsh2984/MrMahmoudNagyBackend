@@ -271,6 +271,10 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
         score: studentGrade?.grade ?? null,
         total: iq.gradeOutOf,
         date: iq.date,
+
+        // ⭐ ADD THESE FIELDS
+        percentage: studentGrade?.percentage ?? null,
+        letterGrade: studentGrade?.letterGrade ?? null,
       };
     });
 
@@ -378,6 +382,10 @@ router.get("/student/:studentId", async (req, res) => {
         score: studentGrade?.grade ?? null,
         total: iq.gradeOutOf,
         date: iq.date,
+
+        // ⭐ ADD THESE
+        percentage: studentGrade?.percentage ?? null,
+        letterGrade: studentGrade?.letterGrade ?? null,
       };
     });
 
@@ -510,6 +518,8 @@ router.get("/parent/:parentId", async (req, res) => {
             score: studentGrade?.grade ?? null,
             total: iq.gradeOutOf,
             date: iq.date,
+            percentage: studentGrade?.percentage ?? null,
+            letterGrade: studentGrade?.letterGrade ?? null,
           };
         });
 
@@ -532,6 +542,81 @@ router.get("/parent/:parentId", async (req, res) => {
       .json({ msg: "❌ Failed to fetch parent performance", error: err.message });
   }
 });
+
+// 🔍 TEST — Send report to ONE student manually
+router.get("/test-report/:studentId", async (req, res) => {
+  try {
+    const axios = require("axios");  // ✅ FIX ADDED HERE
+    const { sendMessage } = require("../utils/wapilot");
+    const { studentId } = req.params;
+
+    const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
+
+    const student = await User.findById(studentId).populate("parentId");
+
+    if (!student) {
+      return res.status(404).json({ msg: "❌ Student not found" });
+    }
+
+    if (!student.studentPhone && !student.parentPhone && !student.parentId?.parentPhone) {
+      return res.status(400).json({ msg: "❌ No phone numbers available" });
+    }
+
+    // Fetch performance using existing API
+    const perfRes = await axios.get(`${BASE_URL}/api/performance/student/${studentId}`);
+    const performance = perfRes.data;
+
+    // Build message
+    const reportText = `
+📘 *Weekly Performance Report – ${student.name}*
+
+🟦 *Attendance*
+${performance.attendance.map(a => `• ${a.title}: ${a.present ? "Present" : "Absent"}`).join("\n")}
+
+🟩 *Tasks*
+${performance.tasks.map(t => `• ${t.title}: ${t.submitted ? "Submitted" : "Not Submitted"}`).join("\n")}
+
+🟧 *Online Quizzes*
+${performance.quizzes.map(q =>
+  `• ${q.quizTitle}: ${q.score !== null ? `${q.score}/${q.total}` : "Not Attempted"}`
+).join("\n")}
+
+🟪 *In-Class Quizzes*
+${performance.inClassQuizzes.map(q =>
+  `• ${q.quizName}: ${
+    q.score !== null
+      ? `${q.score}/${q.total} – ${q.percentage ?? "—"}% (${q.letterGrade ?? "—"})`
+      : "Not Graded"
+  }`
+).join("\n")}
+
+——
+🧪 *This is a test message. Weekly reports are NOT sent yet.*
+`.trim();
+
+    // Send to student
+    if (student.studentPhone) {
+      await sendMessage(`${student.studentPhone}@c.us`, reportText);
+      console.log(`📤 Test report sent to student: ${student.name}`);
+    }
+
+    // Send to parent
+    const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+    if (parentPhone) {
+      await sendMessage(`${parentPhone}@c.us`, reportText);
+      console.log(`📤 Test report sent to parent of: ${student.name}`);
+    }
+
+    res.json({ msg: "✅ Test report sent successfully." });
+
+  } catch (err) {
+    console.error("❌ Error sending test report:", err.message);
+    res.status(500).json({ msg: "❌ Error sending test report", error: err.message });
+  }
+});
+
+
+
 
 
 

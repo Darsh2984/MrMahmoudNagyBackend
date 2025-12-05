@@ -17,6 +17,8 @@ router.post("/", async (req, res) => {
     const studentGrades = group.students.map((student) => ({
       studentId: student._id,
       grade: null,
+      percentage: null,
+      letterGrade: "",
     }));
 
     const quiz = new InClassQuiz({
@@ -61,8 +63,12 @@ router.put("/:quizId/grades", async (req, res) => {
     if (!quiz) return res.status(404).json({ msg: "❌ Quiz not found" });
 
     // ✅ Update all grades
-    quiz.studentGrades = studentGrades;
-    await quiz.save();
+    quiz.studentGrades = studentGrades.map((sg) => ({
+      studentId: sg.studentId,
+      grade: sg.grade ?? null,
+      percentage: sg.percentage ?? null,
+      letterGrade: sg.letterGrade ?? "",
+    }));    await quiz.save();
 
     // ✅ Loop through each graded student
     for (const sg of studentGrades) {

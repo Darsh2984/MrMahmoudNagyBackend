@@ -7,13 +7,15 @@ const InClassQuizSchema = new mongoose.Schema({
   quizName: { type: String, required: true },
   date: { type: Date, required: true },
   gradeOutOf: { type: Number, required: true },
+
   studentGrades: [
     {
       studentId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       grade: { type: Number, default: null },
+      percentage: { type: Number, default: null },
+      letterGrade: { type: String, default: "" },
     },
   ],
 });
 
 module.exports = mongoose.model("InClassQuiz", InClassQuizSchema);
-

@@ -21,6 +21,8 @@ const testRoutes = require("./routes/test");
 const inClassQuizRoutes = require("./routes/inClassQuiz.js") ;
 const videoCheckpointRoutes = require("./routes/videoCheckpoint");
 const quizStopQuestionRoutes = require("./routes/quizStopQuestionRoutes");
+require("./cron/weeklyReport");
+
 
 
 
@@ -34,6 +36,8 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.error(err));
 
+
+require("./cron/weeklyReport");
 // Routes
 app.use("/uploads", express.static("uploads"));
 const authRoutes = require("./routes/auth");
