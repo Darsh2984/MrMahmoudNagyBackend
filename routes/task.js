@@ -344,6 +344,36 @@ router.post("/submission/manual", async (req, res) => {
   }
 }); 
 
+// ----------------- Remove Corrected File Only -----------------
+router.delete("/submission/:id/corrected", async (req, res) => {
+  try {
+    const submission = await Submission.findById(req.params.id);
+    if (!submission) return res.status(404).json({ msg: "❌ Submission not found" });
+
+    if (!submission.correctedFileUrl) {
+      return res.status(400).json({ msg: "⚠️ No corrected file to delete" });
+    }
+
+    const path = submission.correctedFileUrl.split(".b-cdn.net/")[1];
+    const deleteUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
+
+    try {
+      await axios.delete(deleteUrl, { headers: { AccessKey: BUNNY_ACCESS_KEY } });
+    } catch (err) {
+      console.warn("⚠️ Failed to delete corrected file from Bunny:", err.message);
+      // Keep going so DB is consistent even if Bunny delete fails
+    }
+
+    submission.correctedFileUrl = null;
+    await submission.save();
+
+    res.json({ msg: "✅ Corrected file removed", submission });
+  } catch (err) {
+    res.status(500).json({ msg: "❌ Error removing corrected file", error: err.message });
+  }
+});
+
+
 
 
 module.exports = router;
