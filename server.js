@@ -21,15 +21,76 @@ const testRoutes = require("./routes/test");
 const inClassQuizRoutes = require("./routes/inClassQuiz.js") ;
 const videoCheckpointRoutes = require("./routes/videoCheckpoint");
 const quizStopQuestionRoutes = require("./routes/quizStopQuestionRoutes");
+const ticketCategoriesRoutes = require("./routes/ticketCategories");
+const ticketRoutes = require("./routes/tickets");
+const ticketAnalyticsRoutes = require("./routes/ticketAnalytics");
+const http = require("http");
+const { Server } = require("socket.io");
+const server = http.createServer(app)
+const io = new Server(server, {
+  cors: {
+    origin: "http://localhost:3000",
+    credentials: true,
+  },
+});
+app.set("io", io);
+const activeTicketUsers = new Map();
+// ticketId -> Set(userId)
+
+const socketUsers = new Map();
+// socketId -> userId
+io.on("connection", (socket) => {
+  console.log("🟢 Socket connected:", socket.id);
+
+  socket.on("join-ticket", ({ ticketId, userId }) => {
+    socket.join(ticketId);
+
+    socketUsers.set(socket.id, userId);
+
+    if (!activeTicketUsers.has(ticketId)) {
+      activeTicketUsers.set(ticketId, new Set());
+    }
+
+    activeTicketUsers.get(ticketId).add(userId);
+  });
+
+  socket.on("leave-ticket", ({ ticketId, userId }) => {
+    if (activeTicketUsers.has(ticketId)) {
+      activeTicketUsers.get(ticketId).delete(userId);
+
+      if (activeTicketUsers.get(ticketId).size === 0) {
+        activeTicketUsers.delete(ticketId);
+      }
+    }
+  });
+
+  socket.on("disconnect", () => {
+    const userId = socketUsers.get(socket.id);
+
+    if (userId) {
+      activeTicketUsers.forEach((users, ticketId) => {
+        users.delete(userId);
+        if (users.size === 0) {
+          activeTicketUsers.delete(ticketId);
+        }
+      });
+    }
+
+    socketUsers.delete(socket.id);
+    console.log("🔴 Socket disconnected:", socket.id);
+  });
+});
+
+
+
+
+
 require("./cron/weeklyReport");
-
-
-
-
 app.use(cors());
 app.use(express.json());
 // server.js
 require("./cron/deadlineNotifier"); // ✅ starts cron job
+app.set("activeTicketUsers", activeTicketUsers);
 
 // DB connect
 mongoose.connect(process.env.MONGO_URI)
@@ -59,6 +120,12 @@ app.use("/api", testRoutes);
 app.use("/api/inclassquiz", inClassQuizRoutes);
 app.use("/api/videocheckpoint", videoCheckpointRoutes);
 app.use("/api/quizstop", quizStopQuestionRoutes);
+const auth = require("./middleware/auth");
+app.use("/api/ticket-categories", auth, ticketCategoriesRoutes);
+app.use("/api/tickets", auth, require("./routes/tickets"));
+app.use("/api/ticket-analytics",auth, require("./routes/ticketAnalytics"));
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
