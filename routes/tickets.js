@@ -4,11 +4,23 @@ const TicketCategory = require("../models/TicketCategory");
 const TicketMessage = require("../models/TicketMessage");
 const transporter = require("../config/nodemailer");
 const User = require("../models/User");
+const { sendMessage } = require("../utils/wapilot");
+const { ticketUpload } = require("../middleware/ticketUpload");
+
+
+const axios = require("axios");
+
+// ----------------- Bunny Config -----------------
+const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
+const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;
+const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com";
+const BUNNY_CDN_HOST = "https://layth-eg.b-cdn.net"; // your CDN hostname
+
 
 const router = express.Router();
 
 /**
- * round-robin assignment
+ * 🔁 Round-robin assistant assignment
  */
 async function assignAssistant(category) {
   if (!category.assignedAssistants.length) return null;
@@ -23,53 +35,80 @@ async function assignAssistant(category) {
 }
 
 /**
- * STUDENT – create ticket
+ * ===============================
+ * STUDENT – Create Ticket
+ * ===============================
  */
 router.post("/", async (req, res) => {
-  if (req.user.role !== "student") {
-    return res.status(403).json({ message: "Students only" });
-  }
+  try {
+    if (req.user.role !== "student") {
+      return res.status(403).json({ message: "Students only" });
+    }
 
-  const { category: categoryId, subject, message } = req.body;
+    const { category: categoryId, subject, message } = req.body;
 
-  const category = await TicketCategory.findById(categoryId).populate(
-    "assignedAssistants"
-  );
+    const category = await TicketCategory.findById(categoryId).populate(
+      "assignedAssistants"
+    );
 
-  const assistant = await assignAssistant(category);
+    const assistant = await assignAssistant(category);
 
-  const ticket = await Ticket.create({
-    createdBy: req.user._id,
-    category: category._id,
-    subject,
-    assignedTo: assistant?._id || null,
-    assignedAt: assistant ? new Date() : null,
-  });
-
-  await TicketMessage.create({
-    ticket: ticket._id,
-    sender: req.user._id,
-    senderType: "student",
-    message,
-  });
-
-  if (assistant?.email) {
-    await transporter.sendMail({
-      from: `"Mahmoud Nagy Support System" <${process.env.EMAIL_USER}>`,
-      to: assistant.email,
-      subject: "New Support Ticket Assigned",
-      html: `<p>New ticket assigned: <b>${subject}</b></p>`,
+    const ticket = await Ticket.create({
+      createdBy: req.user._id,
+      category: category._id,
+      subject,
+      assignedTo: assistant?._id || null,
+      assignedAt: assistant ? new Date() : null,
     });
-  }
 
-  res.status(201).json(ticket);
+    await TicketMessage.create({
+      ticket: ticket._id,
+      sender: req.user._id,
+      senderType: "student",
+      message,
+    });
+
+    /* 📧 Email notification */
+    if (assistant?.email) {
+      await transporter.sendMail({
+        from: `"Mahmoud Nagy Support System" <${process.env.EMAIL_USER}>`,
+        to: assistant.email,
+        subject: "New Support Ticket Assigned",
+        html: `<p>New ticket assigned: <b>${subject}</b></p>`,
+      });
+    }
+
+    /* 📲 WhatsApp notification (ONLY if assistant offline) */
+    if (assistant?.teacherPhoneNum) {
+      const activeUsers =
+        req.app.get("activeTicketUsers").get(ticket._id.toString()) ||
+        new Set();
+
+      const assistantOnline = activeUsers.has(
+        assistant._id.toString()
+      );
+
+      if (!assistantOnline) {
+        await sendMessage(
+          `${assistant.teacherPhoneNum}@c.us`,
+          `🆕 *New Support Ticket Assigned*\n\n📌 Subject: ${subject}\n👨‍🎓 Student: ${req.user.name}\n\nPlease check the system.`
+        );
+      }
+    }
+
+    res.status(201).json(ticket);
+  } catch (err) {
+    console.error("❌ Create ticket error:", err);
+    res.status(500).json({ message: "Failed to create ticket" });
+  }
 });
 
-
 /**
- * GET – teacher tickets
- * Admin → all tickets
- * Assistant → assigned tickets only
+ * ===============================
+ * GET – Teacher Tickets
+ * Admin → all
+ * Assistant → assigned only
+ * ===============================
  */
 router.get("/teacher", async (req, res) => {
   if (req.user.role !== "teacher") {
@@ -78,9 +117,7 @@ router.get("/teacher", async (req, res) => {
 
   const isAdmin = req.user.assistantOf === null;
 
-  const query = isAdmin
-    ? {} // ✅ admin sees everything
-    : { assignedTo: req.user._id }; // ✅ assistant sees own
+  const query = isAdmin ? {} : { assignedTo: req.user._id };
 
   const tickets = await Ticket.find(query)
     .populate("createdBy", "name")
@@ -90,10 +127,10 @@ router.get("/teacher", async (req, res) => {
   res.json(tickets);
 });
 
-
-
 /**
- * GET – student tickets
+ * ===============================
+ * GET – Student Tickets
+ * ===============================
  */
 router.get("/my", async (req, res) => {
   if (req.user.role !== "student") {
@@ -109,11 +146,10 @@ router.get("/my", async (req, res) => {
   res.json(tickets);
 });
 
-
-
-
 /**
- * GET – ticket details (student / assistant)
+ * ===============================
+ * GET – Ticket Details
+ * ===============================
  */
 router.get("/:id", async (req, res) => {
   const ticket = await Ticket.findById(req.params.id)
@@ -124,24 +160,16 @@ router.get("/:id", async (req, res) => {
     return res.status(404).json({ message: "Ticket not found" });
   }
 
-    console.log("DEBUG ASSISTANT CHECK", {
-    userId: req.user._id,
-    role: req.user.role,
-    assistantOf: req.user.assistantOf,
-    ticketAssignedTo: ticket.assignedTo,
-  });
-  // permissions
   const isStudent =
     req.user.role === "student" &&
     String(ticket.createdBy) === String(req.user._id);
 
   const isAssistant =
     req.user.role === "teacher" &&
-    req.user.assistantOf !== null &&
-    String(ticket.assignedTo._id) === String(req.user._id)
-    
-    const isAdmin = req.user.assistantOf === null;
+    req.user.assistantOf &&
+    String(ticket.assignedTo?._id) === String(req.user._id);
 
+  const isAdmin = req.user.assistantOf === null;
 
   if (!isStudent && !isAssistant && !isAdmin) {
     return res.status(403).json({ message: "Access denied" });
@@ -153,9 +181,10 @@ router.get("/:id", async (req, res) => {
   });
 });
 
-
 /**
- * GET – ticket messages
+ * ===============================
+ * GET – Ticket Messages
+ * ===============================
  */
 router.get("/:id/messages", async (req, res) => {
   const ticket = await Ticket.findById(req.params.id);
@@ -169,17 +198,18 @@ router.get("/:id/messages", async (req, res) => {
 
   const isAssistant =
     req.user.role === "teacher" &&
-    req.user.assistantOf !== null &&
-    String(ticket.assignedTo._id) === String(req.user._id)
+    req.user.assistantOf &&
+    String(ticket.assignedTo) === String(req.user._id);
 
-      const isAdmin = req.user.assistantOf === null;
-
+  const isAdmin = req.user.assistantOf === null;
 
   if (!isStudent && !isAssistant && !isAdmin) {
     return res.status(403).json({ message: "Access denied" });
   }
 
-  const messages = await TicketMessage.find({ ticket: ticket._id })
+  const messages = await TicketMessage.find({
+    ticket: ticket._id,
+  })
     .populate("sender", "name")
     .sort({ createdAt: 1 });
 
@@ -187,13 +217,12 @@ router.get("/:id/messages", async (req, res) => {
 });
 
 /**
- * ASSISTANT – close ticket
+ * ===============================
+ * ASSISTANT – Close Ticket
+ * ===============================
  */
 router.post("/:id/close", async (req, res) => {
-  const isAssistant =
-    req.user.role === "teacher" && req.user.assistantOf !== null;
-
-  if (!isAssistant) {
+  if (req.user.role !== "teacher" || !req.user.assistantOf) {
     return res.status(403).json({ message: "Assistants only" });
   }
 
@@ -212,26 +241,22 @@ router.post("/:id/close", async (req, res) => {
 });
 
 /**
- * POST – add message to ticket (student / assistant)
- * - Saves message
- * - Emits socket event
- * - Sends email ONLY if recipient is NOT active in chat
+ * ===============================
+ * POST – Add Message (Student / Assistant / Admin)
+ * ===============================
  */
 router.post("/:id/messages", async (req, res) => {
   try {
     const { message } = req.body;
-
-    if (!message || !message.trim()) {
+    if (!message?.trim()) {
       return res.status(400).json({ message: "Message required" });
     }
 
-    // 1️⃣ Load ticket (no populate needed here)
     const ticket = await Ticket.findById(req.params.id);
     if (!ticket) {
       return res.status(404).json({ message: "Ticket not found" });
     }
 
-    // 2️⃣ Permission checks
     const isStudent =
       req.user.role === "student" &&
       String(ticket.createdBy) === String(req.user._id);
@@ -243,8 +268,6 @@ router.post("/:id/messages", async (req, res) => {
 
     const isAdmin = req.user.assistantOf === null;
 
-      
-
     if (!isStudent && !isAssistant && !isAdmin) {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -253,7 +276,6 @@ router.post("/:id/messages", async (req, res) => {
       return res.status(400).json({ message: "Ticket is closed" });
     }
 
-    // 3️⃣ Save message
     const newMessage = await TicketMessage.create({
       ticket: ticket._id,
       sender: req.user._id,
@@ -261,55 +283,56 @@ router.post("/:id/messages", async (req, res) => {
       message: message.trim(),
     });
 
-    // 4️⃣ Emit live socket message
+    /* 🔴 Socket emit */
     const io = req.app.get("io");
     io.to(ticket._id.toString()).emit("new-message", {
       _id: newMessage._id,
-      ticket: ticket._id,
-      sender: {
-        _id: req.user._id,
-        name: req.user.name,
-      },
+      sender: { _id: req.user._id, name: req.user.name },
       senderType: newMessage.senderType,
       message: newMessage.message,
       createdAt: newMessage.createdAt,
     });
 
-    // 5️⃣ Email notification logic (ONLY if recipient not active)
-    const activeTicketUsers =
+    /* 🔔 Offline notifications */
+    const activeUsers =
       req.app.get("activeTicketUsers").get(ticket._id.toString()) ||
       new Set();
 
     let recipient = null;
 
-    // student → assistant
     if (isStudent && ticket.assignedTo) {
       recipient = await User.findById(ticket.assignedTo);
     }
 
-    // assistant → student
     if (isAssistant) {
       recipient = await User.findById(ticket.createdBy);
     }
 
-    if (
-      recipient &&
-      recipient.email &&
-      !activeTicketUsers.has(recipient._id.toString())
-    ) {
-      await transporter.sendMail({
-        from: `"Mahmoud Nagy Support System" <${process.env.EMAIL_USER}>`,
-        to: recipient.email,
-        subject: "New message on your support ticket",
-        html: `
-          <p>You have received a new message on your support ticket.</p>
-          <p><b>Ticket:</b> ${ticket.subject}</p>
-          <p>Please log in to view the reply.</p>
-        `,
-      });
+    if (recipient && !activeUsers.has(recipient._id.toString())) {
+      /* Email */
+      if (recipient.email) {
+        await transporter.sendMail({
+          from: `"Mahmoud Nagy Support System" <${process.env.EMAIL_USER}>`,
+          to: recipient.email,
+          subject: "New message on your support ticket",
+          html: `<p><b>${ticket.subject}</b><br/>${message}</p>`,
+        });
+      }
+
+      /* WhatsApp */
+      const phone =
+        recipient.role === "teacher"
+          ? recipient.teacherPhoneNum
+          : recipient.studentPhone;
+
+      if (phone) {
+        await sendMessage(
+          `${phone}@c.us`,
+          `💬 *New Message on Support Ticket*\n\n📌 ${ticket.subject}\n\n${message} \n\n Please check the system and respond there.`
+        );
+      }
     }
 
-    // 6️⃣ Respond
     res.status(201).json(newMessage);
   } catch (err) {
     console.error("❌ Ticket message error:", err);
@@ -318,11 +341,90 @@ router.post("/:id/messages", async (req, res) => {
 });
 
 
+/**
+ * POST – upload attachment to ticket
+ * Supports images, pdfs, documents, audio
+ */
+router.post("/:id/upload",ticketUpload.single("file"),async (req, res) => {
+    try {
+      const ticket = await Ticket.findById(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
 
+      // 🔐 Permission checks
+      const isStudent =
+        req.user.role === "student" &&
+        String(ticket.createdBy) === String(req.user._id);
 
+      const isAssistant =
+        req.user.role === "teacher" &&
+        req.user.assistantOf &&
+        String(ticket.assignedTo) === String(req.user._id);
 
+      const isAdmin = req.user.assistantOf === null;
 
+      if (!isStudent && !isAssistant && !isAdmin) {
+        return res.status(403).json({ message: "Access denied" });
+      }
 
+      if (!req.file) {
+        return res.status(400).json({ message: "File is required" });
+      }
 
+      // 🧠 Detect message type
+      let type = "file";
+      if (req.file.mimetype.startsWith("image/")) type = "image";
+      if (req.file.mimetype.startsWith("audio/")) type = "audio";
+
+      // 🟦 Bunny upload
+      const fileName = `${Date.now()}-${req.file.originalname}`;
+      const path = `tickets/${ticket._id}/${fileName}`;
+      const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
+
+      await axios.put(uploadUrl, req.file.buffer, {
+        headers: {
+          AccessKey: BUNNY_ACCESS_KEY,
+          "Content-Type": "application/octet-stream",
+        },
+        maxBodyLength: Infinity,
+      });
+
+      const cdnUrl = `${BUNNY_CDN_HOST}/${path}`;
+
+      // 💾 Save message
+      const newMessage = await TicketMessage.create({
+        ticket: ticket._id,
+        sender: req.user._id,
+        senderType: isStudent ? "student" : "assistant",
+        type,
+        fileUrl: cdnUrl,
+        fileName: req.file.originalname,
+        fileMime: req.file.mimetype,
+        fileSize: req.file.size,
+      });
+
+      // 🔴 Emit live socket message
+      const io = req.app.get("io");
+      io.to(ticket._id.toString()).emit("new-message", {
+        _id: newMessage._id,
+        type: newMessage.type,
+        fileUrl: newMessage.fileUrl,
+        fileName: newMessage.fileName,
+        sender: {
+          _id: req.user._id,
+          name: req.user.name,
+        },
+        senderType: newMessage.senderType,
+        createdAt: newMessage.createdAt,
+      });
+
+      res.status(201).json(newMessage);
+    } catch (err) {
+      console.error("❌ Ticket upload error:", err);
+      res.status(500).json({ message: "Upload failed" });
+    }
+  }
+);
 
 module.exports = router;

@@ -8,6 +8,9 @@ const userSchema = new mongoose.Schema(
     password: { type: String }, // optional (for social login/future use)
     role: { type: String, enum: ["teacher", "student", "parent"], required: true },
 
+     // 🔹 Teacher extras
+    teacherPhoneNum: { type: String, default: null },
+
       // 🔹 Assistant extras
     assistantOf: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 

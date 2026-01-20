@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-
 const ticketMessageSchema = new mongoose.Schema(
   {
     ticket: {
@@ -16,15 +15,28 @@ const ticketMessageSchema = new mongoose.Schema(
 
     senderType: {
       type: String,
-      enum: ["student", "assistant", "admin"],
+      enum: ["student", "assistant"],
       required: true,
     },
 
+    // 🔹 Message type
+    type: {
+      type: String,
+      enum: ["text", "image", "file", "audio"],
+      default: "text",
+    },
+
+    // 🔹 Text message
     message: {
       type: String,
-      required: true,
-      trim: true,
+      default: "",
     },
+
+    // 🔹 Attachment info
+    fileUrl: String,
+    fileName: String,
+    fileMime: String,
+    fileSize: Number,
   },
   { timestamps: true }
 );
