@@ -280,16 +280,20 @@ router.post("/:id/messages", async (req, res) => {
       ticket: ticket._id,
       sender: req.user._id,
       senderType: isStudent ? "student" : "assistant",
+      type: "text",
       message: message.trim(),
     });
-
     /* 🔴 Socket emit */
     const io = req.app.get("io");
     io.to(ticket._id.toString()).emit("new-message", {
       _id: newMessage._id,
-      sender: { _id: req.user._id, name: req.user.name },
-      senderType: newMessage.senderType,
+      type: "text",
       message: newMessage.message,
+      sender: {
+        _id: req.user._id,
+        name: req.user.name,
+      },
+      senderType: newMessage.senderType,
       createdAt: newMessage.createdAt,
     });
 
@@ -345,7 +349,10 @@ router.post("/:id/messages", async (req, res) => {
  * POST – upload attachment to ticket
  * Supports images, pdfs, documents, audio
  */
-router.post("/:id/upload",ticketUpload.single("file"),async (req, res) => {
+router.post(
+  "/:id/upload",
+  ticketUpload.single("file"),
+  async (req, res) => {
     try {
       const ticket = await Ticket.findById(req.params.id);
       if (!ticket) {
@@ -404,7 +411,7 @@ router.post("/:id/upload",ticketUpload.single("file"),async (req, res) => {
         fileSize: req.file.size,
       });
 
-      // 🔴 Emit live socket message
+      // 🔴 Emit socket event (LIVE)
       const io = req.app.get("io");
       io.to(ticket._id.toString()).emit("new-message", {
         _id: newMessage._id,
@@ -419,6 +426,60 @@ router.post("/:id/upload",ticketUpload.single("file"),async (req, res) => {
         createdAt: newMessage.createdAt,
       });
 
+      // 🔔 OFFLINE NOTIFICATIONS (EMAIL + WHATSAPP)
+      const activeUsers =
+        req.app.get("activeTicketUsers").get(ticket._id.toString()) ||
+        new Set();
+
+      let recipient = null;
+
+      // student → assistant
+      if (isStudent && ticket.assignedTo) {
+        recipient = await User.findById(ticket.assignedTo);
+      }
+
+      // assistant → student
+      if (isAssistant) {
+        recipient = await User.findById(ticket.createdBy);
+      }
+
+      if (
+        recipient &&
+        !activeUsers.has(recipient._id.toString())
+      ) {
+        // 📧 Email
+        if (recipient.email) {
+          await transporter.sendMail({
+            from: `"Mahmoud Nagy Support System" <${process.env.EMAIL_USER}>`,
+            to: recipient.email,
+            subject: "New attachment on your support ticket",
+            html: `
+              <p><b>${ticket.subject}</b></p>
+              <p>A new ${type} has been uploaded to this ticket.</p>
+              <p>Please log in to view it.</p>
+            `,
+          });
+        }
+
+        // 📱 WhatsApp
+        const phone =
+          recipient.role === "teacher"
+            ? recipient.teacherPhoneNum
+            : recipient.studentPhone;
+
+        if (phone) {
+          await sendMessage(
+            `${phone}@c.us`,
+            `📎 *New Attachment on Support Ticket*
+
+📌 *${ticket.subject}*
+📂 Type: ${type.toUpperCase()}
+
+Please log in to the system to view and respond.`
+          );
+        }
+      }
+
       res.status(201).json(newMessage);
     } catch (err) {
       console.error("❌ Ticket upload error:", err);
@@ -426,5 +487,6 @@ router.post("/:id/upload",ticketUpload.single("file"),async (req, res) => {
     }
   }
 );
+
 
 module.exports = router;
