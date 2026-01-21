@@ -10,7 +10,7 @@ const router = express.Router();
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE; // e.g. "studentfiles"
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;     // from Bunny dashboard
 const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com"; // your storage hostname
-const BUNNY_CDN_HOST = "https://layth-eg.b-cdn.net"; // your CDN hostname
+const BUNNY_CDN_HOST = "https://cdn.layth-eg.com"; // your CDN hostname
 
 // ----------------- Helper: Resolve Teacher ID -----------------
 async function resolveTeacherId(teacherId) {

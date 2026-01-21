@@ -41,7 +41,7 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
       },
     });
 
-    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+    const cdnUrl = `https://cdn.layth-eg.com/${path}`;
 
     const q = new QuizStopQuestion({
       imageUrl: cdnUrl,

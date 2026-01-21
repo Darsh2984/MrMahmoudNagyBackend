@@ -49,7 +49,7 @@ router.post("/question", questionUpload.single("image"), async (req, res) => {
       maxBodyLength: Infinity,
     });
 
-    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+    const cdnUrl = `https://cdn.layth-eg.com/${path}`;
 
     const question = new Question({
       imageUrl: cdnUrl,

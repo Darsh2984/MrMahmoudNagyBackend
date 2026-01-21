@@ -14,7 +14,7 @@ const axios = require("axios");
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE;
 const BUNNY_ACCESS_KEY = process.env.BUNNY_ACCESS_KEY;
 const BUNNY_STORAGE_HOST = "https://uk.storage.bunnycdn.com";
-const BUNNY_CDN_HOST = "https://layth-eg.b-cdn.net"; // your CDN hostname
+const BUNNY_CDN_HOST = "https://cdn.layth-eg.com"; // your CDN hostname
 
 
 const router = express.Router();

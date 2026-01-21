@@ -203,7 +203,7 @@ router.post("/submission", upload.single("file"), async (req, res) => {
       maxBodyLength: Infinity,
     });
 
-    const cdnUrl = `https://layth-eg.b-cdn.net/${path}`;
+    const cdnUrl = `https://cdn.layth-eg.com/${path}`;
     const submission = new Submission({ taskId, studentId, fileUrl: cdnUrl });
 
     await submission.save();

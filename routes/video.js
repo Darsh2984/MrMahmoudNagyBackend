@@ -61,7 +61,7 @@ router.post("/", videoUpload.single("video"), async (req, res) => {
       if (err) console.error("⚠️ Failed to remove temp file:", err.message);
     });
 
-    const cdnUrl = `https://layth-eg.b-cdn.net/${storagePath}`;
+    const cdnUrl = `https://cdn.layth-eg.com/${storagePath}`;
 
     const video = new Video({
       title,
