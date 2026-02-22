@@ -1,114 +1,232 @@
 // cron/weeklyReport.js
+
 const cron = require("node-cron");
 const axios = require("axios");
 const User = require("../models/User");
+const Task = require("../models/Task");
+const QuizSubmission = require("../models/QuizSubmission");
+const Submission = require("../models/Submission");
+const Session = require("../models/Session");
 const { sendMessage } = require("../utils/wapilot");
 
-// Your backend URL (needed to call the existing performance endpoint)
-const BASE_URL = process.env.BASE_URL || "https://yourdomain.com"; 
-// EXAMPLE: "http://localhost:5000" OR "https://yourapp.com"
+const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
+
+// 40 seconds delay (anti-ban protection)
+const DELAY_MS = 40000;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 // ---------------------------------------------------------
-// 🔹 Format Weekly Performance Report (Student + Parent)
+// 🔹 Format Weekly Performance Report
 // ---------------------------------------------------------
-function formatPerformanceReport(name, performance) {
 
-  // Attendance
+function formatPerformanceReport(name, performance, fromDate, toDate) {
+
   const totalSessions = performance.attendance.length;
   const presents = performance.attendance.filter(a => a.present).length;
   const absents = totalSessions - presents;
 
-  // Tasks
-  const tasks = performance.tasks
-    .map(t => `• ${t.title}: ${t.submitted ? "Submitted" : "Not Submitted"}`)
-    .join("\n");
+  const tasks = performance.tasks.length
+    ? performance.tasks
+        .map(t => `• ${t.title}: ${t.submitted ? "Submitted" : "Not Submitted"}`)
+        .join("\n")
+    : "No Tasks Due This Week";
 
-  // Online Quizzes
-  const onlineQuizzes = performance.quizzes
-    .map(q =>
-      `• ${q.quizTitle}: ${
-        q.score !== null ? `${q.score}/${q.total}` : "Not Attempted"
-      }`
-    )
-    .join("\n");
+  const onlineQuizzes = performance.quizzes.length
+    ? performance.quizzes
+        .map(q => `• ${q.quizTitle}: ${q.score}/${q.total}`)
+        .join("\n")
+    : "No Online Quiz Submissions This Week";
 
-  // In-Class Quizzes
-  const inClass = performance.inClassQuizzes
-    .map(q =>
-      `• ${q.quizName}: ${
-        q.score !== null
-          ? `${q.score}/${q.total} – ${q.percentage ?? "—"}% (${q.letterGrade ?? "—"})`
-          : "Not Graded"
-      }`
-    )
-    .join("\n");
+  const inClass = performance.inClassQuizzes.length
+    ? performance.inClassQuizzes
+        .map(q =>
+          `• ${q.quizName}: ${q.score}/${q.total} – ${q.percentage ?? "—"}% (${q.letterGrade ?? "—"})`
+        )
+        .join("\n")
+    : "No In-Class Quizzes This Week";
 
   return `
 📘 *Weekly Performance Report – ${name}*
+📅 ${fromDate.toDateString()} → ${toDate.toDateString()}
 
 🟦 *Attendance*
 • ${presents} Present
 • ${absents} Absent
 
-🟩 *Tasks*
-${tasks || "No Tasks"}
+🟩 *Tasks (By Deadline)*
+${tasks}
 
-🟧 *Online Quizzes*
-${onlineQuizzes || "No Online Quizzes"}
+🟧 *Online Quizzes (By Submission Date)*
+${onlineQuizzes}
 
-🟪 *In-Class Quizzes*
-${inClass || "No In-Class Quizzes"}
+🟪 *In-Class Quizzes (By Quiz Date)*
+${inClass}
 
 ——
-📅 *This report is generated automatically every Sunday at 12 PM.*
 `;
 }
 
 // ---------------------------------------------------------
-// 🔹 Main Job → Send Weekly Reports
+// 🔹 Main Weekly Job (ALL STUDENTS)
 // ---------------------------------------------------------
+
 async function sendWeeklyReports() {
   try {
-    console.log("⏳ Running weekly performance report job...");
+    console.log("🚀 Running weekly report for ALL students...");
 
-    // 1️⃣ Fetch all students
+    // -------------------------------------------------
+    // Rolling 7-Day Window
+    // -------------------------------------------------
+
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(now.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+
+    // -------------------------------------------------
+    // Fetch All Students
+    // -------------------------------------------------
+
     const students = await User.find({ role: "student" }).populate("parentId");
 
     for (const student of students) {
       try {
-        if (!student.groupId) continue; // skip unassigned students
 
-        // 2️⃣ Fetch performance using EXISTING API
+        if (!student.groupId) continue;
+
+        const groupId = student.groupId;
+
+        // -------------------------------------------------
+        // 1️⃣ Attendance
+        // -------------------------------------------------
+
+        const weeklySessions = await Session.find({
+          groupId,
+          date: { $gte: sevenDaysAgo, $lte: now }
+        });
+
+        const attendance = weeklySessions.map(session => {
+          const studentAttendance = session.attendance.find(a =>
+            a.studentId.toString() === student._id.toString()
+          );
+
+          return {
+            date: session.date,
+            title: session.title,
+            present: studentAttendance?.status === "Present"
+          };
+        });
+
+        // -------------------------------------------------
+        // 2️⃣ Tasks
+        // -------------------------------------------------
+
+        const weeklyTasks = await Task.find({
+          groups: groupId,
+          deadline: { $gte: sevenDaysAgo, $lte: now }
+        });
+
+        const submissions = await Submission.find({
+          studentId: student._id,
+          taskId: { $in: weeklyTasks.map(t => t._id) }
+        });
+
+        const tasks = weeklyTasks.map(t => ({
+          title: t.title,
+          submitted: submissions.some(
+            s => s.taskId.toString() === t._id.toString()
+          )
+        }));
+
+        // -------------------------------------------------
+        // 3️⃣ Online Quizzes
+        // -------------------------------------------------
+
+        const weeklySubmissions = await QuizSubmission.find({
+          studentId: student._id,
+          submittedAt: { $gte: sevenDaysAgo, $lte: now },
+          isSubmitted: true
+        }).populate("quizId");
+
+        const quizzes = weeklySubmissions.map(s => ({
+          quizTitle: s.quizId.title,
+          score: s.score,
+          total: s.quizId.questions.length
+        }));
+
+        // -------------------------------------------------
+        // 4️⃣ In-Class Quizzes
+        // -------------------------------------------------
+
         const performanceRes = await axios.get(
           `${BASE_URL}/api/performance/student/${student._id}`
         );
 
-        const performance = performanceRes.data;
-        const reportText = formatPerformanceReport(student.name, performance);
+        let inClass = performanceRes.data.inClassQuizzes;
 
-        // 3️⃣ Send to student
+        inClass = inClass.filter(q => {
+          const quizDate = new Date(q.date);
+          return quizDate >= sevenDaysAgo && quizDate <= now;
+        });
+
+        // -------------------------------------------------
+        // Build Performance Object
+        // -------------------------------------------------
+
+        const performance = {
+          attendance,
+          tasks,
+          quizzes,
+          inClassQuizzes: inClass
+        };
+
+        const reportText = formatPerformanceReport(
+          student.name,
+          performance,
+          sevenDaysAgo,
+          now
+        );
+
+        // -------------------------------------------------
+        // Send to Student
+        // -------------------------------------------------
+
         if (student.studentPhone) {
+          console.log(`📤 Sending to student: ${student.name}`);
           await sendMessage(`${student.studentPhone}@c.us`, reportText);
-          console.log(`📤 Sent report to student: ${student.name}`);
+
+          console.log(`⏳ Waiting ${DELAY_MS / 1000} seconds...`);
+          await sleep(DELAY_MS);
         }
 
-        // 4️⃣ Send to parent
+        // -------------------------------------------------
+        // Send to Parent
+        // -------------------------------------------------
+
         const parentPhone =
           student.parentPhone ||
-          student.parentId?.parentPhone || 
+          student.parentId?.parentPhone ||
           null;
 
         if (parentPhone) {
+          console.log(`📤 Sending to parent of: ${student.name}`);
           await sendMessage(`${parentPhone}@c.us`, reportText);
-          console.log(`📤 Sent report to parent of: ${student.name}`);
+
+          console.log(`⏳ Waiting ${DELAY_MS / 1000} seconds...`);
+          await sleep(DELAY_MS);
         }
 
       } catch (err) {
-        console.error(`❌ Error sending report for ${student.name}:`, err.message);
+        console.error(`❌ Error processing ${student.name}:`, err.message);
       }
     }
 
-    console.log("✅ Weekly report job complete.");
+    console.log("🎉 Weekly reports finished successfully.");
 
   } catch (err) {
     console.error("❌ Weekly report job FAILED:", err.message);
@@ -116,15 +234,19 @@ async function sendWeeklyReports() {
 }
 
 // ---------------------------------------------------------
-// 🔹 Schedule Job → Every Sunday at 12:00 PM Cairo Time
+// 🔹 Schedule Every Sunday 12:00 Cairo Time
 // ---------------------------------------------------------
+
 cron.schedule(
   "0 12 * * SUN",
   () => {
     console.log("🕛 Weekly scheduled job triggered!");
     sendWeeklyReports();
   },
-  { scheduled: true, timezone: "Africa/Cairo" }
+  {
+    scheduled: true,
+    timezone: "Africa/Cairo"
+  }
 );
 
 module.exports = { sendWeeklyReports };
