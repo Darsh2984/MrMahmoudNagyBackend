@@ -12,7 +12,7 @@ const { sendMessage } = require("../utils/wapilot");
 const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 
 // 40 seconds delay (anti-ban protection)
-const DELAY_MS = 40000;
+const DELAY_MS = 60000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
