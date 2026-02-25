@@ -150,6 +150,30 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// ----------------- Update Video URL -----------------
+router.put("/:id", async (req, res) => {
+  try {
+    const { videoUrl, title } = req.body;
+
+    const video = await Video.findById(req.params.id);
+    if (!video) return res.status(404).json({ msg: "Video not found" });
+
+    if (videoUrl !== undefined) video.videoUrl = videoUrl;
+    if (title !== undefined) video.title = title;
+
+    await video.save();
+
+    res.json({ msg: "Video updated successfully", video });
+
+  } catch (err) {
+    console.error("UPDATE VIDEO ERROR:", err);
+    res.status(500).json({
+      msg: "Error updating video",
+      error: err.message,
+    });
+  }
+});
+
 // ----------------- SSE Progress -----------------
 router.get("/progress/:uploadId", (req, res) => {
   const { uploadId } = req.params;
