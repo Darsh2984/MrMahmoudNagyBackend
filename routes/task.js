@@ -191,28 +191,76 @@ router.delete("/task/:id", async (req, res) => {
 // ----------------- Student Upload Submission -----------------
 router.post("/submission", upload.single("file"), async (req, res) => {
   try {
+    console.log("---- Upload Request Received ----");
+    console.log("Task ID:", req.body.taskId);
+    console.log("Student ID:", req.body.studentId);
+
     const { taskId, studentId } = req.body;
-    if (!req.file) return res.status(400).json({ msg: "❌ No file uploaded" });
+
+    if (!req.file) {
+      console.error("❌ No file uploaded from client");
+      return res.status(400).json({ msg: "No file uploaded" });
+    }
+
+    console.log("File Info:");
+    console.log("Original Name:", req.file.originalname);
+    console.log("Size (bytes):", req.file.size);
+    console.log("Mime Type:", req.file.mimetype);
 
     const fileName = Date.now() + "-" + req.file.originalname;
     const path = `submissions/${fileName}`;
     const uploadUrl = `${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${path}`;
 
+    console.log("Uploading to Bunny URL:", uploadUrl);
+
     await axios.put(uploadUrl, req.file.buffer, {
-      headers: { AccessKey: BUNNY_ACCESS_KEY, "Content-Type": "application/octet-stream" },
+      headers: {
+        AccessKey: BUNNY_ACCESS_KEY,
+        "Content-Type": "application/octet-stream",
+      },
       maxBodyLength: Infinity,
     });
+
+    console.log("✅ Bunny upload successful");
 
     const cdnUrl = `https://cdn.layth-eg.com/${path}`;
     const submission = new Submission({ taskId, studentId, fileUrl: cdnUrl });
 
     await submission.save();
-    res.json({ msg: "✅ Submission uploaded", submission });
+
+    console.log("✅ Submission saved to database");
+
+    res.json({ msg: "Submission uploaded", submission });
+
   } catch (err) {
-    res.status(500).json({ msg: "❌ Error uploading submission", error: err.message });
+
+    console.error("❌❌❌ UPLOAD ERROR START ❌❌❌");
+
+    // Full raw error
+    console.error("Error Object:", err);
+
+    // Axios specific error details
+    if (err.response) {
+      console.error("Axios Response Status:", err.response.status);
+      console.error("Axios Response Data:", err.response.data);
+      console.error("Axios Response Headers:", err.response.headers);
+    }
+
+    if (err.request) {
+      console.error("Axios Request:", err.request);
+    }
+
+    console.error("Error Message:", err.message);
+    console.error("Stack Trace:", err.stack);
+
+    console.error("❌❌❌ UPLOAD ERROR END ❌❌❌");
+
+    res.status(500).json({
+      msg: "Error uploading submission",
+      error: err.message,
+    });
   }
 });
-
 // ----------------- Get Submissions for a Task -----------------
 router.get("/submission/:taskId", async (req, res) => {
   try {
