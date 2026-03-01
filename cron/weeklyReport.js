@@ -272,10 +272,16 @@ async function sendWeeklyReports() {
 // CRON SCHEDULE – Every Sunday at 12 PM
 // ---------------------------------------------------------
 
-cron.schedule("0 12 * * 0", async () => {
-  console.log("🕛 Sunday 12PM Triggered");
-  await sendWeeklyReports();
-});
+cron.schedule(
+  "30 13 * * 0",
+  async () => {
+    console.log("🕜 Sunday 1:30PM Triggered (Africa/Cairo)");
+    await sendWeeklyReports();
+  },
+  {
+    timezone: "Africa/Cairo",
+  }
+);
 
 // Optional manual export
 module.exports = { sendWeeklyReports };
