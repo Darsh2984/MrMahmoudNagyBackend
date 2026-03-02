@@ -99,20 +99,20 @@ router.post("/task", async (req, res) => {
               );
           }
 
-          // 🔹 WhatsApp to Student
-          if (student.studentPhone) {
-            sendMessage(`${student.studentPhone}@c.us`, studentMsg).catch((err) =>
-              console.warn(`⚠️ Failed WhatsApp to student ${student.name}:`, err.message)
-            );
-          }
+          // // 🔹 WhatsApp to Student
+          // if (student.studentPhone) {
+          //   sendMessage(`${student.studentPhone}@c.us`, studentMsg).catch((err) =>
+          //     console.warn(`⚠️ Failed WhatsApp to student ${student.name}:`, err.message)
+          //   );
+          // }
 
-          // 🔹 WhatsApp to Parent
-          const parentPhone = student.parentPhone || student.parentId?.parentPhone;
-          if (parentPhone) {
-            sendMessage(`${parentPhone}@c.us`, parentMsg).catch((err) =>
-              console.warn(`⚠️ Failed WhatsApp to parent of ${student.name}:`, err.message)
-            );
-          }
+          // // 🔹 WhatsApp to Parent
+          // const parentPhone = student.parentPhone || student.parentId?.parentPhone;
+          // if (parentPhone) {
+          //   sendMessage(`${parentPhone}@c.us`, parentMsg).catch((err) =>
+          //     console.warn(`⚠️ Failed WhatsApp to parent of ${student.name}:`, err.message)
+          //   );
+          // }
 
           // 🔹 Email to Parent
           if (student.parentId?.email) {
