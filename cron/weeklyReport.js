@@ -291,7 +291,7 @@ async function sendWeeklyReports() {
 // ---------------------------------------------------------
 
 cron.schedule(
-  "24 15 * * 1",
+  "26 15 * * 1",
   async () => {
     console.log("🕔 Monday 5:00PM Triggered (Africa/Cairo)");
     await sendWeeklyReports();
