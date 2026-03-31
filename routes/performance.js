@@ -30,72 +30,95 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
     let { groupId, teacherId } = req.params;
 
     teacherId = await resolveTeacherId(teacherId);
-    if (!teacherId) {
-      return res.status(404).json({ msg: "❌ Teacher not found" });
-    }
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
-    // 1. Fetch group with students
-    const group = await Group.findById(groupId)
-      .populate({
+    // 1. Fetch group + assistants in parallel
+    const [group, assistantDocs] = await Promise.all([
+      Group.findById(groupId).populate({
         path: "students",
         populate: { path: "parentId", select: "name parentPhone" },
-      });
-    if (!group) {
-      return res.status(404).json({ msg: "❌ Group not found" });
-    }
-
-    // 🧠 Flexible filter — include teacher + assistant creators
-    const assistantDocs = await User.find({ assistantOf: teacherId }).select("_id");
-    const assistantIds = assistantDocs.map((a) => a._id.toString());
-
-    const teacherFilter = [
-      { teacherId },                                 // main teacher
-      { teacherId: req.params.teacherId },           // whoever called (assistant or teacher)
-      { teacherId: { $in: assistantIds } },          // any assistant of this teacher
-    ];
-
-    const [tasks, quizzes, sessions, inClassQuizzes] = await Promise.all([
-      Task.find({ groups: groupId, $or: teacherFilter }),
-      Quiz.find({ groups: groupId, $or: teacherFilter }),
-      Session.find({ groupId, $or: teacherFilter }).sort({ createdAt: 1 }),
-      InClassQuiz.find({ groupId, $or: teacherFilter }).sort({ date: 1 }),
+      }),
+      User.find({ assistantOf: teacherId }).select("_id"),
     ]);
 
-    console.log({
-      tasks: tasks.length,
-      quizzes: quizzes.length,
-      sessions: sessions.length,
-      inClassQuizzes: inClassQuizzes.length,
-    });
-    // 3. Create workbook
+    if (!group) return res.status(404).json({ msg: "❌ Group not found" });
+
+    const assistantIds = assistantDocs.map((a) => a._id.toString());
+    const teacherFilter = [
+      { teacherId },
+      { teacherId: req.params.teacherId },
+      { teacherId: { $in: assistantIds } },
+    ];
+
+    const studentIds = group.students.map((s) => s._id);
+
+    // 2. Fetch everything in parallel — including ALL submissions at once
+    const [tasks, quizzes, sessions, inClassQuizzes, allTaskSubs, allQuizSubs] =
+      await Promise.all([
+        Task.find({ groups: groupId, $or: teacherFilter }),
+        Quiz.find({ groups: groupId, $or: teacherFilter }),
+        Session.find({ groupId, $or: teacherFilter }).sort({ createdAt: 1 }),
+        InClassQuiz.find({ groupId, $or: teacherFilter }).sort({ date: 1 }),
+
+        // ✅ Fetch ALL submissions for ALL students at once — no loop needed
+        Submission.find({
+          studentId: { $in: studentIds },
+          taskId: { $in: [] }, // filled below after tasks load — see note
+        }),
+        QuizSubmission.find({
+          studentId: { $in: studentIds },
+          quizId: { $in: [] }, // filled below
+        }),
+      ]);
+
+    // NOTE: Since tasks/quizzes aren't available before Promise.all resolves,
+    // fetch submissions right after in one batch each:
+    const [taskSubs, quizSubs] = await Promise.all([
+      Submission.find({
+        studentId: { $in: studentIds },
+        taskId: { $in: tasks.map((t) => t._id) },
+      }),
+      QuizSubmission.find({
+        studentId: { $in: studentIds },
+        quizId: { $in: quizzes.map((q) => q._id) },
+      }),
+    ]);
+
+    // 3. Build O(1) lookup maps — avoids scanning arrays inside loops
+    // "studentId_taskId" → true
+    const taskSubMap = new Set(
+      taskSubs.map((s) => `${s.studentId}_${s.taskId}`)
+    );
+
+    // "studentId_quizId" → { score, total }
+    const quizSubMap = new Map(
+      quizSubs.map((s) => [`${s.studentId}_${s.quizId}`, s])
+    );
+
+    // 4. Build workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet(`${group.name} Performance`);
 
-    // 4. Dynamic columns
     worksheet.columns = [
-      { header: "Student Name", key: "studentName", width: 25 },
+      { header: "Student Name",   key: "studentName",  width: 25 },
       { header: "Student Number", key: "studentPhone", width: 20 },
-      { header: "Parent Name", key: "parentName", width: 25 },
-      { header: "Parent Phone", key: "parentPhone", width: 20 },
-      // Session attendance columns
+      { header: "Parent Name",    key: "parentName",   width: 25 },
+      { header: "Parent Phone",   key: "parentPhone",  width: 20 },
       ...sessions.map((s) => ({
         header: `Session: ${s.title || new Date(s.createdAt).toLocaleDateString()}`,
         key: `session_${s._id}`,
         width: 18,
       })),
-      // Tasks
       ...tasks.map((t) => ({
         header: `Task: ${t.title}`,
         key: `task_${t._id}`,
         width: 25,
       })),
-      // Quizzes
       ...quizzes.map((q) => ({
         header: `Quiz: ${q.title}`,
         key: `quiz_${q._id}`,
         width: 20,
       })),
-      // In-class quizzes
       ...inClassQuizzes.map((iq) => ({
         header: `In-Class Quiz: ${iq.quizName}`,
         key: `inclass_${iq._id}`,
@@ -103,70 +126,60 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
       })),
     ];
 
-    // 5. Add rows per student
+    // 5. Add rows — ZERO extra DB queries here now
     for (const student of group.students) {
+      const sid = student._id.toString();
+
       const row = {
-        studentName: student.name,
+        studentName:  student.name,
         studentPhone: student.studentPhone || "N/A",
-        parentName: student.parentId?.name || student.parentName || "N/A",
-        parentPhone: student.parentId?.parentPhone || student.parentPhone || "N/A",
+        parentName:   student.parentId?.name || student.parentName || "N/A",
+        parentPhone:  student.parentId?.parentPhone || student.parentPhone || "N/A",
       };
 
-      // Attendance per session
+      // Attendance — already embedded in session docs
       for (const s of sessions) {
-        const found = s.attendance?.find(
-          (a) => a.studentId.toString() === student._id.toString()
-        );
-        row[`session_${s._id}`] = found
-          ? found.status === "Present"
-            ? "Present"
-            : "Absent"
-          : "Absent";
+        const found = s.attendance?.find((a) => a.studentId?.toString() === sid);
+        row[`session_${s._id}`] = found?.status === "Present" ? "Present" : "Absent";
       }
 
-      // Task submissions
+      // Tasks — O(1) set lookup
       for (const t of tasks) {
-        const submission = await Submission.findOne({
-          studentId: student._id,
-          taskId: t._id,
-        });
-        row[`task_${t._id}`] = submission ? "✅ Submitted" : "❌ Not Submitted";
+        row[`task_${t._id}`] = taskSubMap.has(`${sid}_${t._id}`)
+          ? "✅ Submitted"
+          : "❌ Not Submitted";
       }
 
-      // Quiz submissions
+      // Quizzes — O(1) map lookup
       for (const q of quizzes) {
-        const submission = await QuizSubmission.findOne({
-          studentId: student._id,
-          quizId: q._id,
-        });
+        const sub = quizSubMap.get(`${sid}_${q._id}`);
         row[`quiz_${q._id}`] =
-          submission && submission.score !== null
-            ? `${submission.score}/${q.questions.length}`
+          sub?.score != null
+            ? `${sub.score}/${q.questions?.length ?? "?"}`
             : "❌ Not Attempted";
       }
 
-      // In-Class Quiz grades
+      // In-Class Quizzes — already embedded in iq.studentGrades
       for (const iq of inClassQuizzes) {
-        const gradeEntry = iq.studentGrades.find(
-          (g) => g.studentId.toString() === student._id.toString()
-        );
-        row[`inclass_${iq._id}`] = gradeEntry
-          ? `${gradeEntry.grade ?? 0}/${iq.gradeOutOf}`
+        const grade = iq.studentGrades?.find((g) => g.studentId?.toString() === sid);
+        row[`inclass_${iq._id}`] = grade
+          ? `${grade.grade ?? 0}/${iq.gradeOutOf}`
           : "❌ Not Attempted";
       }
 
       worksheet.addRow(row);
     }
 
-    // 6. Style header
-    worksheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
-    worksheet.getRow(1).fill = {
+    // 6. Style header row
+    const headerRow = worksheet.getRow(1);
+    headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    headerRow.fill = {
       type: "pattern",
       pattern: "solid",
       fgColor: { argb: "FF0B3C49" },
     };
 
-    // 7. Send Excel
+    // 7. Stream response
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -175,17 +188,13 @@ router.get("/export/:groupId/teacher/:teacherId", async (req, res) => {
       "Content-Disposition",
       `attachment; filename=${group.name}_performance.xlsx`
     );
-
     await workbook.xlsx.write(res);
     res.end();
   } catch (err) {
-    console.error("❌ Error exporting group performance:", err);
-    res
-      .status(500)
-      .json({ msg: "❌ Failed to export group performance", error: err.message });
+    console.error("❌ Export error:", err);
+    res.status(500).json({ msg: "❌ Failed to export", error: err.message });
   }
 });
-
 
 
 // ----------------- Get Student Performance for teacher -----------------
@@ -193,95 +202,96 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
   try {
     let { groupId, studentId, teacherId } = req.params;
 
-    if (!groupId || groupId === "null") {
+    if (!groupId || groupId === "null")
       return res.status(400).json({ msg: "❌ Student is not assigned to a group" });
-    }
 
-    teacherId = await resolveTeacherId(teacherId);
-    // 🔹 Fetch all assistants working under this teacher
-    const assistants = await User.find({ assistantOf: teacherId }).select("_id");
-    const assistantIds = assistants.map(a => a._id);
-    if (!teacherId) {
-      return res.status(404).json({ msg: "❌ Teacher not found" });
-    }
+    // Resolve teacher + assistants in parallel
+    const [resolvedId, assistantDocs] = await Promise.all([
+      resolveTeacherId(teacherId),
+      User.find({ assistantOf: teacherId }).select("_id"),
+    ]);
+    teacherId = resolvedId;
+    if (!teacherId) return res.status(404).json({ msg: "❌ Teacher not found" });
 
-    // Attendance
-      const sessions = await Session.find({ groupId, teacherId })
-        .populate("attendance.studentId");
+    const assistantIds = assistantDocs.map((a) => a._id);
 
-      sessions.forEach((s) => {
-        s.attendance = s.attendance.filter((a) => a.studentId); // remove nulls
-      });    const attendance = sessions.map((s) => {
-      const studentAttendance = s.attendance.find(
-        (a) => a.studentId && a.studentId._id.toString() === studentId
+    // ✅ All 4 main queries fire at the same time
+    const [sessions, tasks, quizzes, inClassQuizzes] = await Promise.all([
+      // ✅ No populate — just fetch attendance array as-is (it stores studentId as ObjectId)
+      Session.find({ groupId, teacherId }).select("title createdAt attendance"),
+
+      Task.find({ groups: groupId, teacherId }).select("_id title"),
+
+      Quiz.find({ groups: groupId, teacherId })
+        .select("_id title questions")
+        .populate("questions", "_id"), // only need count
+
+      InClassQuiz.find({
+        groupId,
+        teacherId: { $in: [teacherId, ...assistantIds] },
+      }).select("quizName gradeOutOf date studentGrades"),
+    ]);
+
+    const taskIds   = tasks.map((t) => t._id);
+    const quizIds   = quizzes.map((q) => q._id);
+
+    // ✅ Both submission queries fire in parallel
+    const [submissions, quizSubmissions] = await Promise.all([
+      Submission.find({ studentId, taskId: { $in: taskIds } }).select("taskId"),
+      QuizSubmission.find({ studentId, quizId: { $in: quizIds } }).select("quizId score"),
+    ]);
+
+    // Build lookup sets/maps
+    const submittedTaskIds = new Set(submissions.map((s) => s.taskId.toString()));
+    const quizScoreMap = new Map(
+      quizSubmissions.map((s) => [s.quizId.toString(), s.score])
+    );
+
+    // Shape responses
+    const attendance = sessions.map((s) => {
+      const record = s.attendance?.find(
+        (a) => a.studentId?.toString() === studentId
       );
       return {
-        date: s.createdAt,
-        title: s.title,
-        present: studentAttendance?.status === "Present",
+        date:    s.createdAt,
+        title:   s.title,
+        present: record?.status === "Present",
       };
     });
 
-    // Tasks
-    const tasks = await Task.find({ groups: groupId, teacherId });
-    const submissions = await Submission.find({
-      studentId,
-      taskId: { $in: tasks.map((t) => t._id) },
-    });
     const taskStatus = tasks.map((t) => ({
-      _id: t._id,
-      title: t.title,
-      submitted: submissions.some((s) => s.taskId.toString() === t._id.toString()),
+      _id:       t._id,
+      title:     t.title,
+      submitted: submittedTaskIds.has(t._id.toString()),
     }));
 
-    // Quizzes
-    const quizzes = await Quiz.find({ groups: groupId, teacherId }).populate("questions");
-    const quizSubmissions = await QuizSubmission.find({
-      studentId,
-      quizId: { $in: quizzes.map((q) => q._id) },
-    }).populate("quizId", "title");
-
     const quizGrades = quizzes.map((q) => {
-      const submission = quizSubmissions.find(
-        (s) => s.quizId._id.toString() === q._id.toString()
-      );
+      const score = quizScoreMap.get(q._id.toString());
       return {
         quizTitle: q.title,
-        score: submission ? submission.score : null,
-        total: q.questions.length,
+        score:     score ?? null,
+        total:     q.questions.length,
       };
     });
 
-    const inClassQuizzes = await InClassQuiz.find({
-      groupId,
-      teacherId: { $in: [teacherId, ...assistantIds] },
-    }).populate("studentGrades.studentId", "name");
-
     const inClassGrades = inClassQuizzes.map((iq) => {
-      const studentGrade = iq.studentGrades.find((g) => {
-        const id =
-          typeof g.studentId === "object"
-            ? g.studentId?._id?.toString()
-            : g.studentId?.toString();
-        return id === studentId;
-      });
-
+      const g = iq.studentGrades?.find(
+        (g) => g.studentId?.toString() === studentId
+      );
       return {
-        quizName: iq.quizName,
-        score: studentGrade?.grade ?? null,
-        total: iq.gradeOutOf,
-        date: iq.date,
-
-        // ⭐ ADD THESE FIELDS
-        percentage: studentGrade?.percentage ?? null,
-        letterGrade: studentGrade?.letterGrade ?? null,
+        quizName:    iq.quizName,
+        score:       g?.grade ?? null,
+        total:       iq.gradeOutOf,
+        date:        iq.date,
+        percentage:  g?.percentage ?? null,
+        letterGrade: g?.letterGrade ?? null,
       };
     });
 
     res.json({
       attendance,
-      tasks: taskStatus,
-      quizzes: quizGrades,
+      tasks:          taskStatus,
+      quizzes:        quizGrades,
       inClassQuizzes: inClassGrades,
     });
   } catch (err) {
@@ -289,7 +299,6 @@ router.get("/:groupId/:studentId/teacher/:teacherId", async (req, res) => {
     res.status(500).json({ msg: "❌ Failed to fetch performance", error: err.message });
   }
 });
-
 // ✅ Student Performance (no need to pass teacherId from frontend) for student call
 router.get("/student/:studentId", async (req, res) => {
   try {
