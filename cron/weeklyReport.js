@@ -1,294 +1,285 @@
-// cron/weeklyReport.js
-
-const cron = require("node-cron");
-const axios = require("axios");
-const { sendMessage } = require("../utils/wapilot");
-
-const User = require("../models/User");
-const Task = require("../models/Task");
-const QuizSubmission = require("../models/QuizSubmission");
-const Submission = require("../models/Submission");
-const Session = require("../models/Session");
-
-const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
-
-// ---------------------------------------------------------
-// CONFIG
-// ---------------------------------------------------------
-
-const GROUP_IDS = [
-  "690a1c2eb201f7703aef6646",
-  "68d01e89dbf36ce8d92d36c2",
-  "68eeb053109d336a913edc33",
-  "68f338dec334d2d6f3fe4770",
-  "68cdab54fe115dddbb55c008",
-  "68d7bf2ff11ff7f0d3f8de0c",
-  "68cdab49fe115dddbb55c003",
-  "68cdab76fe115dddbb55c00d",
-  "68d02dbedbf36ce8d92d3704",
-  "68d0341cdbf36ce8d92d3874",
-  "68d181b1f499fc231effe7e3",
-  "68d1a249742bba8c97f71070"
-];
+// // cron/weeklyReport.js
 
-const MESSAGE_DELAY_MS = 60000;
-const BATCH_SIZE = 10;
-const BATCH_DELAY_MS = 180000;
+// const cron = require("node-cron");
+// const axios = require("axios");
+// const { sendMessage } = require("../utils/wapilot");
 
-const GROUP_DELAY_MS = 1800000; // ⭐ 30 minutes
+// const User = require("../models/User");
+// const Task = require("../models/Task");
+// const QuizSubmission = require("../models/QuizSubmission");
+// const Submission = require("../models/Submission");
+// const Session = require("../models/Session");
 
-const TEST_MODE = false;
-const TEST_NUMBER = "+201099250572";
+// const BASE_URL = process.env.BASE_URL || "http://localhost:5000";
 
-// ---------------------------------------------------------
+// // ---------------------------------------------------------
+// // CONFIG
+// // ---------------------------------------------------------
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// const GROUP_IDS = [
+//   //  "68eeb053109d336a913edc33",
+//   //  "68f338dec334d2d6f3fe4770",
+//    "68d01e89dbf36ce8d92d36c2"
+// ];
 
-function buildWindow() {
-  const now = new Date();
-  const toDate = new Date(now.setHours(23, 59, 59, 999));
-  const fromDate = new Date();
-  fromDate.setDate(toDate.getDate() - 14);
-  fromDate.setHours(0, 0, 0, 0);
-  return { fromDate, toDate };
-}
+// const MESSAGE_DELAY_MS = 0;
+// const BATCH_SIZE = 20;
+// const BATCH_DELAY_MS = 180000;
 
-function logProgress(sent) {
-  console.log(`   📊 Total Messages Sent So Far: ${sent}`);
-}
+// const GROUP_DELAY_MS = 1800000; // ⭐ 30 minutes
 
-// ---------------------------------------------------------
-// REPORT BUILDER
-// ---------------------------------------------------------
+// const TEST_MODE = false;
+// const TEST_NUMBER = "+201099250572";
 
-function formatReport(studentName, attendance, tasks, quizzes, inClass, fromDate, toDate) {
+// // ---------------------------------------------------------
 
-  const presents = attendance.filter(a => a.present).length;
-  const absents = attendance.length - presents;
+// function sleep(ms) {
+//   return new Promise(resolve => setTimeout(resolve, ms));
+// }
 
-  const attendanceSection = `
-🟦 Attendance
-* ${presents} Present
-* ${absents} Absent
-`.trim();
+// function buildWindow() {
+//   const now = new Date();
+//   const toDate = new Date(now.setHours(23, 59, 59, 999));
+//   const fromDate = new Date();
+//   fromDate.setDate(toDate.getDate() - 20);
+//   fromDate.setHours(0, 0, 0, 0);
+//   return { fromDate, toDate };
+// }
 
-  const tasksSection = tasks.length
-    ? tasks.map(t => `* ${t.title} : ${t.submitted ? "Submitted" : "Not Submitted"}`).join("\n")
-    : "No Tasks This Period";
+// function logProgress(sent) {
+//   console.log(`   📊 Total Messages Sent So Far: ${sent}`);
+// }
 
-  const onlineQuizSection = quizzes.length
-    ? quizzes.map(q => `* ${q.quizTitle}: ${q.score ?? "null"}/${q.total ?? 0}`).join("\n")
-    : "No Online Quiz Submissions This Period";
+// // ---------------------------------------------------------
+// // REPORT BUILDER
+// // ---------------------------------------------------------
 
-  const inClassSection = inClass.length
-    ? inClass.map(q =>
-        `* ${q.quizName}: ${q.score ?? "null"}/${q.total ?? 0} – ${q.percentage ?? "—"}% (${q.letterGrade ?? ""})`
-      ).join("\n")
-    : "No In-Class Quiz Records This Period";
+// function formatReport(studentName, attendance, tasks, quizzes, inClass, fromDate, toDate) {
 
-  return `
-📘 Performance Report (Last 2 Weeks) – ${studentName} with MR Mahmoud Nagy
-📅 ${fromDate.toDateString()} → ${toDate.toDateString()}
+//   const presents = attendance.filter(a => a.present).length;
+//   const absents = attendance.length - presents;
 
-${attendanceSection}
+//   const attendanceSection = `
+// 🟦 Attendance
+// * ${presents} Present
+// * ${absents} Absent
+// `.trim();
 
-🟩 Tasks
-${tasksSection}
+//   const tasksSection = tasks.length
+//     ? tasks.map(t => `* ${t.title} : ${t.submitted ? "Submitted" : "Not Submitted"}`).join("\n")
+//     : "No Tasks This Period";
 
-🟧 Online Quizzes
-${onlineQuizSection}
+//   const onlineQuizSection = quizzes.length
+//     ? quizzes.map(q => `* ${q.quizTitle}: ${q.score ?? "null"}/${q.total ?? 0}`).join("\n")
+//     : "No Online Quiz Submissions This Period";
 
-🟪 In-Class Quizzes
-${inClassSection}
+//   const inClassSection = inClass.length
+//     ? inClass.map(q =>
+//         `* ${q.quizName}: ${q.score ?? "null"}/${q.total ?? 0} – ${q.percentage ?? "—"}% (${q.letterGrade ?? ""})`
+//       ).join("\n")
+//     : "No In-Class Quiz Records This Period";
 
-——
-`.trim();
-}
+//   return `
+// 📘 Performance Report (Last 2 Weeks) – ${studentName} with MR Mahmoud Nagy
+// 📅 ${fromDate.toDateString()} → ${toDate.toDateString()}
 
-// ---------------------------------------------------------
-// MAIN LOGIC
-// ---------------------------------------------------------
+// ${attendanceSection}
 
-async function sendWeeklyReports() {
+// 🟩 Tasks
+// ${tasksSection}
 
-  console.log("🚀 Performance Report Job Started");
+// 🟧 Online Quizzes
+// ${onlineQuizSection}
 
-  const { fromDate, toDate } = buildWindow();
+// 🟪 In-Class Quizzes
+// ${inClassSection}
 
-  let messageCounter = 0;
-  let successCounter = 0;
-  let failureCounter = 0;
+// ——
+// `.trim();
+// }
 
-  for (let g = 0; g < GROUP_IDS.length; g++) {
+// // ---------------------------------------------------------
+// // MAIN LOGIC
+// // ---------------------------------------------------------
 
-    const groupId = GROUP_IDS[g];
+// async function sendWeeklyReports() {
 
-    console.log("\n====================================");
-    console.log(`📚 Starting Group ${g + 1}/${GROUP_IDS.length}`);
-    console.log("====================================");
+//   console.log("🚀 Performance Report Job Started");
 
-    const students = await User.find({
-      role: "student",
-      groupId: groupId
-    });
+//   const { fromDate, toDate } = buildWindow();
 
-    console.log(`👥 Students in group: ${students.length}`);
+//   let messageCounter = 0;
+//   let successCounter = 0;
+//   let failureCounter = 0;
 
-    for (let i = 0; i < students.length; i++) {
+//   for (let g = 0; g < GROUP_IDS.length; g++) {
 
-      const student = students[i];
+//     const groupId = GROUP_IDS[g];
 
-      console.log(`\n📌 ${i + 1}/${students.length} → ${student.name}`);
+//     console.log("\n====================================");
+//     console.log(`📚 Starting Group ${g + 1}/${GROUP_IDS.length}`);
+//     console.log("====================================");
 
-      try {
+//     const students = await User.find({
+//       role: "student",
+//       groupId: groupId
+//     });
 
-        // -------- Attendance --------
+//     console.log(`👥 Students in group: ${students.length}`);
 
-        const sessions = await Session.find({
-          groupId,
-          date: { $gte: fromDate, $lte: toDate },
-        });
+//     for (let i = 0; i < students.length; i++) {
 
-        const attendance = sessions.map(session => {
-          const record = session.attendance.find(
-            a => a.studentId.toString() === student._id.toString()
-          );
-          return { present: record?.status === "Present" };
-        });
+//       const student = students[i];
 
-        // -------- Tasks --------
+//       console.log(`\n📌 ${i + 1}/${students.length} → ${student.name}`);
 
-        const tasksInWindow = await Task.find({
-          groups: groupId,
-          deadline: { $gte: fromDate, $lte: toDate },
-        });
+//       try {
 
-        const submissions = await Submission.find({
-          studentId: student._id,
-          taskId: { $in: tasksInWindow.map(t => t._id) },
-        });
+//         // -------- Attendance --------
 
-        const tasks = tasksInWindow.map(t => ({
-          title: t.title,
-          submitted: submissions.some(
-            s => s.taskId.toString() === t._id.toString()
-          ),
-        }));
+//         const sessions = await Session.find({
+//           groupId,
+//           date: { $gte: fromDate, $lte: toDate },
+//         });
 
-        // -------- Online Quizzes --------
+//         const attendance = sessions.map(session => {
+//           const record = session.attendance.find(
+//             a => a.studentId.toString() === student._id.toString()
+//           );
+//           return { present: record?.status === "Present" };
+//         });
 
-        const quizSubs = await QuizSubmission.find({
-          studentId: student._id,
-          submittedAt: { $gte: fromDate, $lte: toDate },
-          isSubmitted: true,
-        }).populate("quizId");
+//         // -------- Tasks --------
 
-        const quizzes = quizSubs.map(s => ({
-          quizTitle: s.quizId?.title ?? "Quiz",
-          score: s.score,
-          total: s.quizId?.questions?.length ?? 0,
-        }));
+//         const tasksInWindow = await Task.find({
+//           groups: groupId,
+//           deadline: { $gte: fromDate, $lte: toDate },
+//         });
 
-        // -------- In Class --------
+//         const submissions = await Submission.find({
+//           studentId: student._id,
+//           taskId: { $in: tasksInWindow.map(t => t._id) },
+//         });
 
-        let inClass = [];
-        try {
-          const res = await axios.get(
-            `${BASE_URL}/api/performance/student/${student._id}`
-          );
+//         const tasks = tasksInWindow.map(t => ({
+//           title: t.title,
+//           submitted: submissions.some(
+//             s => s.taskId.toString() === t._id.toString()
+//           ),
+//         }));
 
-          inClass =
-            res.data.inClassQuizzes?.filter(q => {
-              const quizDate = new Date(q.date);
-              return quizDate >= fromDate && quizDate <= toDate;
-            }) || [];
+//         // -------- Online Quizzes --------
 
-        } catch {}
+//         const quizSubs = await QuizSubmission.find({
+//           studentId: student._id,
+//           submittedAt: { $gte: fromDate, $lte: toDate },
+//           isSubmitted: true,
+//         }).populate("quizId");
 
-        const reportText = formatReport(
-          student.name,
-          attendance,
-          tasks,
-          quizzes,
-          inClass,
-          fromDate,
-          toDate
-        );
+//         const quizzes = quizSubs.map(s => ({
+//           quizTitle: s.quizId?.title ?? "Quiz",
+//           score: s.score,
+//           total: s.quizId?.questions?.length ?? 0,
+//         }));
 
-        // -------- SEND --------
+//         // -------- In Class --------
 
-        if (TEST_MODE) {
+//         let inClass = [];
+//         try {
+//           const res = await axios.get(
+//             `${BASE_URL}/api/performance/student/${student._id}`
+//           );
 
-          await sendMessage(TEST_NUMBER, reportText);
-          messageCounter++;
-          successCounter++;
+//           inClass =
+//             res.data.inClassQuizzes?.filter(q => {
+//               const quizDate = new Date(q.date);
+//               return quizDate >= fromDate && quizDate <= toDate;
+//             }) || [];
 
-          console.log("   ✅ Sent TEST");
+//         } catch {}
 
-          await sleep(MESSAGE_DELAY_MS);
+//         const reportText = formatReport(
+//           student.name,
+//           attendance,
+//           tasks,
+//           quizzes,
+//           inClass,
+//           fromDate,
+//           toDate
+//         );
 
-        } else {
+//         // -------- SEND --------
 
-          if (student.studentPhone) {
-            await sendMessage(student.studentPhone, reportText);
-            messageCounter++;
-            successCounter++;
+//         if (TEST_MODE) {
 
-            console.log("   ✅ Sent to student");
+//           await sendMessage(TEST_NUMBER, reportText);
+//           messageCounter++;
+//           successCounter++;
 
-            await sleep(MESSAGE_DELAY_MS);
-          }
+//           console.log("   ✅ Sent TEST");
 
-          if (student.parentPhone) {
-            await sendMessage(student.parentPhone, reportText);
-            messageCounter++;
-            successCounter++;
+//           await sleep(MESSAGE_DELAY_MS);
 
-            console.log("   ✅ Sent to parent");
+//         } else {
 
-            await sleep(MESSAGE_DELAY_MS);
-          }
-        }
+//           if (student.studentPhone) {
+//             await sendMessage(student.studentPhone, reportText);
+//             messageCounter++;
+//             successCounter++;
 
-        logProgress(messageCounter);
+//             console.log("   ✅ Sent to student");
 
-        if (messageCounter > 0 && messageCounter % BATCH_SIZE === 0) {
-          console.log("⏳ Batch delay 3 minutes...");
-          await sleep(BATCH_DELAY_MS);
-        }
+//             await sleep(MESSAGE_DELAY_MS);
+//           }
 
-      } catch (err) {
-        failureCounter++;
-        console.log("❌ Student error:", err.message);
-      }
-    }
+//           if (student.parentPhone) {
+//             await sendMessage(student.parentPhone, reportText);
+//             messageCounter++;
+//             successCounter++;
 
-    // ⭐ GROUP DELAY
-    if (g < GROUP_IDS.length - 1) {
-      console.log("🛑 Finished Group → Waiting 30 minutes before next group...");
-      await sleep(GROUP_DELAY_MS);
-    }
-  }
+//             console.log("   ✅ Sent to parent");
 
-  console.log("\n🏁 Job Finished");
-  console.log("Messages:", messageCounter);
-  console.log("Success:", successCounter);
-  console.log("Failures:", failureCounter);
-}
+//             await sleep(MESSAGE_DELAY_MS);
+//           }
+//         }
 
-// ---------------------------------------------------------
-// CRON
-// ---------------------------------------------------------
+//         logProgress(messageCounter);
 
-cron.schedule(
-  "30 15 * * 1",
-  async () => {
-    console.log("🕔 Monday Trigger");
-    await sendWeeklyReports();
-  },
-  { timezone: "Africa/Cairo" }
-);
+//         if (messageCounter > 0 && messageCounter % BATCH_SIZE === 0) {
+//           console.log("⏳ Batch delay 3 minutes...");
+//           await sleep(BATCH_DELAY_MS);
+//         }
 
-module.exports = { sendWeeklyReports };
+//       } catch (err) {
+//         failureCounter++;
+//         console.log("❌ Student error:", err.message);
+//       }
+//     }
+
+//     // ⭐ GROUP DELAY
+//     if (g < GROUP_IDS.length - 1) {
+//       console.log("🛑 Finished Group → Waiting 30 minutes before next group...");
+//       await sleep(GROUP_DELAY_MS);
+//     }
+//   }
+
+//   console.log("\n🏁 Job Finished");
+//   console.log("Messages:", messageCounter);
+//   console.log("Success:", successCounter);
+//   console.log("Failures:", failureCounter);
+// }
+
+// // ---------------------------------------------------------
+// // CRON
+// // ---------------------------------------------------------
+
+// cron.schedule(
+//   "30 15 * * 1",
+//   async () => {
+//     console.log("🕔 Monday Trigger");
+//     await sendWeeklyReports();
+//   },
+//   { timezone: "Africa/Cairo" }
+// );
+
+// module.exports = { sendWeeklyReports };
