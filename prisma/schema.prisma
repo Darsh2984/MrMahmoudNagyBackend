@@ -358,16 +358,10 @@ model InClassQuiz {
   createdAt   DateTime @default(now())
 }
 
-model QuizStopQuestion {
-  id            String   @id @default(uuid())
-  imageUrl      String
-  correctAnswer String
-  yearId        String
-  unitId        String
-  chapterId     String
-  teacherId     String
-  createdAt     DateTime @default(now())
-}
+// NOTE: QuizStopQuestion (a standalone "stop and answer" question type) was merged into
+// Question + VideoCheckpoint per an explicit decision — the old system had built the same
+// underlying feature twice. A "stop question" in a video is now just a Question attached
+// to a VideoCheckpoint at a given timestamp; no separate model needed.
 
 // ---------------- Sessions & Live Grading ----------------
 
