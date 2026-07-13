@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
+const { notify } = require("./notification.service");
 
 /** Student submits homework for a task. */
 async function submitHomework({ taskId, studentId, file }) {
@@ -32,10 +33,20 @@ async function gradeSubmission({ submissionId, grade, comments, correctedFile })
     );
   }
 
-  return prisma.submission.update({
+  const graded = await prisma.submission.update({
     where: { id: submissionId },
     data: { grade, comments, correctedFileUrl, gradedAt: new Date() },
   });
+
+  notify({
+    userId: submission.studentId,
+    type: "GRADE_POSTED",
+    title: "Your homework was graded",
+    body: `You scored ${grade}`,
+    link: `/submissions/${submissionId}`,
+  }).catch((err) => console.error("notify() failed:", err.message));
+
+  return graded;
 }
 
 module.exports = { submitHomework, gradeSubmission };

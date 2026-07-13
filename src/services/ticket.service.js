@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { getAssignedAssistantForStudent } = require("./assistantAssignment.service");
+const { notify } = require("./notification.service");
 
 /**
  * Only the ticket's creator, its assigned assistant, or a Teacher/Head may see or act
@@ -75,10 +76,20 @@ async function markResolvedPendingConfirmation(ticketId, user) {
   if (!ticket) throw { status: 404, msg: "Ticket not found" };
   assertTicketAccess(ticket, user);
 
-  return prisma.ticket.update({
+  const updated = await prisma.ticket.update({
     where: { id: ticketId },
     data: { status: "RESOLVED_PENDING_CONFIRM" },
   });
+
+  notify({
+    userId: ticket.createdById,
+    type: "TICKET_RESOLVED",
+    title: "Your ticket was marked resolved",
+    body: "Please confirm whether this actually solved your issue",
+    link: `/tickets/${ticketId}`,
+  }).catch((err) => console.error("notify() failed:", err.message));
+
+  return updated;
 }
 
 /**

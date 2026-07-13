@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
+const { notify } = require("./notification.service");
 
 /** Teacher poses a question worth X marks during a live session. */
 async function createLiveQuestion({ sessionId, prompt, gradeOutOf }) {
@@ -39,10 +40,20 @@ async function gradeAnswer({ answerId, gradedById, grade }) {
     throw { status: 400, msg: `Grade must be between 0 and ${answer.liveQuestion.gradeOutOf}` };
   }
 
-  return prisma.liveQuestionAnswer.update({
+  const graded = await prisma.liveQuestionAnswer.update({
     where: { id: answerId },
     data: { grade, status: "GRADED", gradedById, gradedAt: new Date() },
   });
+
+  notify({
+    userId: answer.studentId,
+    type: "GRADE_POSTED",
+    title: "Your answer was graded",
+    body: `You scored ${grade}/${answer.liveQuestion.gradeOutOf} on "${answer.liveQuestion.prompt}"`,
+    link: `/live-questions/${answer.liveQuestionId}`,
+  }).catch((err) => console.error("notify() failed:", err.message));
+
+  return graded;
 }
 
 async function listAnswersForQuestion(liveQuestionId) {

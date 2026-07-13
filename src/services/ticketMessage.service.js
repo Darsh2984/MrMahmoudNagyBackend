@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { assertTicketAccess } = require("./ticket.service");
+const { notify } = require("./notification.service");
 
 /**
  * `io` is passed in from the controller (via req.app.get("io")) rather than required
@@ -21,6 +22,18 @@ async function sendMessage({ ticketId, sender, content, io }) {
 
   if (io) {
     io.to(ticketId).emit("new-ticket-message", message);
+  }
+
+  // Notify whichever side didn't send this message.
+  const notifyUserId = senderType === "STUDENT" ? ticket.assignedAssistantId : ticket.createdById;
+  if (notifyUserId) {
+    notify({
+      userId: notifyUserId,
+      type: "TICKET_REPLY",
+      title: "New reply on your ticket",
+      body: content.length > 100 ? content.slice(0, 100) + "…" : content,
+      link: `/tickets/${ticketId}`,
+    }).catch((err) => console.error("notify() failed:", err.message));
   }
 
   return message;

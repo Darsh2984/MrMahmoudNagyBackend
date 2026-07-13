@@ -23,6 +23,7 @@ const delegationRoutes = require("./routes/delegation.routes");
 const ticketCategoryRoutes = require("./routes/ticketCategory.routes");
 const ticketRoutes = require("./routes/ticket.routes");
 const assistantStatsRoutes = require("./routes/assistantStats.routes");
+const notificationRoutes = require("./routes/notification.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -49,6 +50,7 @@ app.use("/api/delegations", delegationRoutes);
 app.use("/api/ticket-categories", ticketCategoryRoutes);
 app.use("/api/tickets", ticketRoutes);
 app.use("/api/assistant-stats", assistantStatsRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 

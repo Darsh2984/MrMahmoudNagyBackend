@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
+const { notify } = require("./notification.service");
 
 /**
  * Teacher/Head delegates a submitted homework paper to a specific assistant for grading.
@@ -37,15 +38,25 @@ async function gradeDelegatedSubmission({ delegationId, grade, comments, correct
     );
   }
 
-  await prisma.submission.update({
+  const gradedSubmission = await prisma.submission.update({
     where: { id: delegation.submissionId },
     data: { grade, comments, correctedFileUrl, gradedAt: new Date() },
   });
 
-  return prisma.delegation.update({
+  const result = await prisma.delegation.update({
     where: { id: delegationId },
     data: { completedAt: new Date() },
   });
+
+  notify({
+    userId: gradedSubmission.studentId,
+    type: "GRADE_POSTED",
+    title: "Your homework was graded",
+    body: `You scored ${grade}`,
+    link: `/submissions/${delegation.submissionId}`,
+  }).catch((err) => console.error("notify() failed:", err.message));
+
+  return result;
 }
 
 /**
