@@ -27,6 +27,8 @@ const notificationRoutes = require("./routes/notification.routes");
 const yearRoutes = require("./routes/year.routes");
 const schoolRoutes = require("./routes/school.routes");
 const questionRoutes = require("./routes/question.routes");
+const quizRoutes = require("./routes/quiz.routes");
+const quizStudentRoutes = require("./routes/quizStudent.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -57,6 +59,8 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/years", yearRoutes);
 app.use("/api/schools", schoolRoutes);
 app.use("/api/questions", questionRoutes);
+app.use("/api/quiz", quizRoutes);
+app.use("/api/quiz-student", quizStudentRoutes);
 
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 
