@@ -34,4 +34,39 @@ async function getStudentProfile(studentId) {
   return student;
 }
 
-module.exports = { setAttendanceMode, getStudentProfile };
+/** Students not yet in any group — no parent-account creation logic anymore (access-code model instead). */
+async function listUnassignedStudents() {
+  return prisma.user.findMany({
+    where: { role: "STUDENT", groupMemberships: { none: {} } },
+    select: { id: true, name: true, email: true, accessCode: true, schoolId: true },
+  });
+}
+
+/**
+ * Updates a student's own fields plus their parent contact info — the old system
+ * managed a separate Parent user record here; that's gone now (access-code model),
+ * so parentName/parentPhone are just plain fields on the student.
+ */
+async function updateStudent(studentId, { name, email, studentPhone, parentName, parentPhone }) {
+  const student = await prisma.user.findUnique({ where: { id: studentId } });
+  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
+
+  return prisma.user.update({
+    where: { id: studentId },
+    data: {
+      ...(name ? { name } : {}),
+      ...(email ? { email: email.toLowerCase() } : {}),
+      ...(studentPhone ? { phone: studentPhone } : {}),
+      ...(parentName ? { parentName } : {}),
+      ...(parentPhone ? { parentPhone } : {}),
+    },
+  });
+}
+
+async function deleteStudent(studentId) {
+  const student = await prisma.user.findUnique({ where: { id: studentId } });
+  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
+  return prisma.user.delete({ where: { id: studentId } });
+}
+
+module.exports = { setAttendanceMode, getStudentProfile, listUnassignedStudents, updateStudent, deleteStudent };

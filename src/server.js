@@ -29,6 +29,10 @@ const schoolRoutes = require("./routes/school.routes");
 const questionRoutes = require("./routes/question.routes");
 const quizRoutes = require("./routes/quiz.routes");
 const quizStudentRoutes = require("./routes/quizStudent.routes");
+const inClassQuizRoutes = require("./routes/inClassQuiz.routes");
+const videoCheckpointRoutes = require("./routes/videoCheckpoint.routes");
+const adminRoutes = require("./routes/admin.routes");
+const performanceRoutes = require("./routes/performance.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +65,10 @@ app.use("/api/schools", schoolRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/quiz-student", quizStudentRoutes);
+app.use("/api/inclassquiz", inClassQuizRoutes);
+app.use("/api/videocheckpoint", videoCheckpointRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/performance", performanceRoutes);
 
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 

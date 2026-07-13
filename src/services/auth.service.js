@@ -1,7 +1,10 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const prisma = require("../config/prisma");
+const transporter = require("../config/nodemailer");
 const { generateAccessCode } = require("../utils/accessCode");
+const performanceService = require("./performance.service");
 
 const SALT_ROUNDS = 10;
 
@@ -120,7 +123,11 @@ async function login({ email, password }) {
   };
 }
 
-/** Parent flow: no account, just look up a student read-only by access code. */
+/**
+ * Parent flow: no account, just look up a student read-only by access code. This is
+ * the full replacement for the old system's separate parent-account/parent-login
+ * flow — includes a performance summary for whichever group the student is in.
+ */
 async function lookupByAccessCode(accessCode) {
   const student = await prisma.user.findUnique({
     where: { accessCode },
@@ -134,7 +141,50 @@ async function lookupByAccessCode(accessCode) {
     },
   });
   if (!student) throw { status: 404, msg: "Invalid access code" };
-  return student;
+
+  const groupId = student.groupMemberships[0]?.group.id;
+  const performance = groupId ? await performanceService.getStudentPerformance(student.id, groupId) : null;
+
+  return { ...student, performance };
+}
+
+/** Requests a password reset — emails a time-limited token link, ported from the old system. */
+async function forgotPassword(email) {
+  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  if (!user) throw { status: 404, msg: "User not found" };
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const resetPasswordExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { resetPasswordToken: token, resetPasswordExpires },
+  });
+
+  const resetURL = `${process.env.FRONTEND_URL}reset-password/${token}`;
+  await transporter.sendMail({
+    to: user.email,
+    from: process.env.EMAIL_USER,
+    subject: "Password Reset",
+    html: `<h3>Password Reset Request</h3><p>Click the link below to reset your password:</p><a href="${resetURL}">${resetURL}</a><p>This link will expire in 15 minutes.</p>`,
+  });
+
+  return { msg: "Password reset link sent to your email" };
+}
+
+async function resetPassword(token, newPassword) {
+  const user = await prisma.user.findFirst({
+    where: { resetPasswordToken: token, resetPasswordExpires: { gt: new Date() } },
+  });
+  if (!user) throw { status: 400, msg: "Invalid or expired token" };
+
+  const hashed = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashed, resetPasswordToken: null, resetPasswordExpires: null },
+  });
+
+  return { msg: "Password reset successful. Please log in." };
 }
 
 module.exports = {
@@ -144,4 +194,6 @@ module.exports = {
   demoteFromHead,
   login,
   lookupByAccessCode,
+  forgotPassword,
+  resetPassword,
 };
