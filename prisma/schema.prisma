@@ -309,7 +309,7 @@ model Question {
   quizzes     QuizQuestion[]
 }
 
-/** Join table for Question <-> Topic many-to-many tagging. */
+// Join table for Question <-> Topic many-to-many tagging.
 model QuestionTopic {
   id         String   @id @default(uuid())
   questionId String
