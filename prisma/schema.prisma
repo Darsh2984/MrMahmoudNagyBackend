@@ -1,0 +1,555 @@
+// ============================================================
+// Mahmoud Nagy Platform — Prisma Schema
+// Postgres + Prisma. See /PROJECT_SPEC.md for the full rationale.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- Enums ----------------
+
+enum Role {
+  TEACHER
+  ASSISTANT
+  STUDENT
+}
+
+enum AttendanceMode {
+  ONGROUND
+  ONLINE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+enum GradingStatus {
+  PENDING
+  GRADED
+}
+
+enum ResolutionStatus {
+  OPEN
+  RESOLVED_PENDING_CONFIRM
+  CONFIRMED_RESOLVED
+  REOPENED
+}
+
+enum SenderType {
+  STUDENT
+  ASSISTANT
+}
+
+enum NotificationType {
+  REPORT_READY
+  DEADLINE_REMINDER
+  GRADE_POSTED
+  TICKET_REPLY
+  TICKET_RESOLVED
+  GENERAL
+}
+
+// ---------------- Core: Users & Org structure ----------------
+
+model User {
+  id       String @id @default(uuid())
+  name     String
+  email    String @unique
+  password String? // null until activated, e.g. first-login flows
+
+  role Role
+
+  // A Head of Assistants is NOT a separate role — it's an ASSISTANT who has been
+  // promoted by the Teacher. They still do normal assistant work (grading, tickets,
+  // group assignments, delegation targets) but also get admin-level access to
+  // everything except creating/removing assistant accounts (stays Teacher-only).
+  isHeadAssistant Boolean @default(false)
+
+  // Teacher/Assistant hierarchy
+  // For ASSISTANT users: who manages them.
+  // - Before any assistant is promoted to Head, assistants report to the Teacher (managedByHeadId = null).
+  // - Once at least one Head of Assistants exists, every non-head assistant must report to one (managedByHeadId set).
+  // - Head Assistants themselves are not managed by another head (managedByHeadId stays null for them).
+  managedByHeadId String?
+  managedByHead   User?   @relation("HeadManagesAssistants", fields: [managedByHeadId], references: [id])
+  managedAssistants User[] @relation("HeadManagesAssistants")
+
+  // Per-assistant permission flags (only meaningful when role == ASSISTANT)
+  // e.g. { "canGradeHomework": true, "canManageTickets": false, ... }
+  permissions Json?
+
+  // Student-only fields
+  attendanceMode AttendanceMode?
+  accessCode     String?         @unique // used by parents to look up a student read-only
+  schoolId       String?
+  school         School?         @relation(fields: [schoolId], references: [id])
+
+  // Contact extras
+  phone       String?
+  parentName  String?
+  parentPhone String?
+
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations (as teacher/creator)
+  yearsCreated    Year[]              @relation("YearTeacher")
+  unitsCreated    Unit[]              @relation("UnitTeacher")
+  materials       Material[]          @relation("MaterialTeacher")
+  videos          Video[]             @relation("VideoTeacher")
+  questions       Question[]          @relation("QuestionTeacher")
+  quizzes         Quiz[]              @relation("QuizTeacher")
+  sessionsHosted  Session[]           @relation("SessionTeacher")
+  tasksCreated    Task[]              @relation("TaskTeacher")
+
+  // Relations (as student)
+  groupMemberships   GroupMembership[]
+  quizSubmissions    QuizSubmission[]
+  submissions        Submission[]        @relation("StudentSubmissions")
+  liveAnswers        LiveQuestionAnswer[] @relation("StudentLiveAnswers")
+  attendanceRecords  SessionAttendance[]
+  ticketsCreated     Ticket[]            @relation("TicketCreatedBy")
+
+  // Relations (as assistant)
+  groupAssignments      AssistantGroupAssignment[]
+  delegationsReceived   Delegation[]        @relation("AssistantDelegations")
+  delegationsAssigned   Delegation[]        @relation("DelegatedBy")
+  gradedLiveAnswers     LiveQuestionAnswer[] @relation("GradedBy")
+  ticketsAssigned       Ticket[]            @relation("TicketAssignedTo")
+  ticketMessagesSent    TicketMessage[]
+
+  notifications Notification[]
+  pushTokens    PushToken[]
+
+  @@index([role])
+  @@index([managedByHeadId])
+}
+
+model School {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  students  User[]
+}
+
+// ---------------- Academic structure ----------------
+
+model Year {
+  id        String   @id @default(uuid())
+  name      String
+  teacherId String
+  teacher   User     @relation("YearTeacher", fields: [teacherId], references: [id])
+  zoomLinks Json? // [{ title, link }]
+  groups    Group[]
+  units     Unit[]
+  createdAt DateTime @default(now())
+}
+
+model Group {
+  id        String   @id @default(uuid())
+  name      String
+  yearId    String
+  year      Year     @relation(fields: [yearId], references: [id])
+  createdAt DateTime @default(now())
+
+  members            GroupMembership[]
+  assistantAssignments AssistantGroupAssignment[]
+  sessions           Session[]
+  tasks              TaskGroup[]
+  quizzes            QuizGroup[]
+}
+
+model GroupMembership {
+  id        String @id @default(uuid())
+  groupId   String
+  group     Group  @relation(fields: [groupId], references: [id])
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  @@unique([groupId, studentId])
+}
+
+// Which assistant(s) handle which group(s) — drives ticket routing + delegation eligibility
+model AssistantGroupAssignment {
+  id          String @id @default(uuid())
+  assistantId String
+  assistant   User   @relation(fields: [assistantId], references: [id])
+  groupId     String
+  group       Group  @relation(fields: [groupId], references: [id])
+
+  @@unique([assistantId, groupId])
+}
+
+model Unit {
+  id        String   @id @default(uuid())
+  name      String
+  yearId    String
+  year      Year     @relation(fields: [yearId], references: [id])
+  teacherId String
+  teacher   User     @relation("UnitTeacher", fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+
+  chapters  Chapter[]
+  materials Material[] @relation("MaterialUnit")
+  videos    Video[]    @relation("VideoUnit")
+  questions Question[] @relation("QuestionUnit")
+}
+
+model Chapter {
+  id        String   @id @default(uuid())
+  name      String
+  unitId    String
+  unit      Unit     @relation(fields: [unitId], references: [id])
+  createdAt DateTime @default(now())
+
+  topics    Topic[]
+  materials Material[] @relation("MaterialChapter")
+  videos    Video[]    @relation("VideoChapter")
+  questions Question[] @relation("QuestionChapter")
+}
+
+// NEW level in the hierarchy — most resources attach here
+model Topic {
+  id        String   @id @default(uuid())
+  name      String
+  chapterId String
+  chapter   Chapter  @relation(fields: [chapterId], references: [id])
+  createdAt DateTime @default(now())
+
+  materials Material[] @relation("MaterialTopic")
+  videos    Video[]    @relation("VideoTopic")
+  questions Question[] @relation("QuestionTopic")
+}
+
+// ---------------- Resources ----------------
+// Material/Video attach to exactly one of Topic/Chapter/Unit.
+// App-layer validation enforces "exactly one of topicId/chapterId/unitId is set".
+
+model Material {
+  id        String   @id @default(uuid())
+  title     String
+  fileUrl   String
+  topicId   String?
+  topic     Topic?   @relation("MaterialTopic", fields: [topicId], references: [id])
+  chapterId String?
+  chapter   Chapter? @relation("MaterialChapter", fields: [chapterId], references: [id])
+  unitId    String?
+  unit      Unit?    @relation("MaterialUnit", fields: [unitId], references: [id])
+  teacherId String
+  teacher   User     @relation("MaterialTeacher", fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+model Video {
+  id        String   @id @default(uuid())
+  title     String
+  videoUrl  String
+  topicId   String?
+  topic     Topic?   @relation("VideoTopic", fields: [topicId], references: [id])
+  chapterId String?
+  chapter   Chapter? @relation("VideoChapter", fields: [chapterId], references: [id])
+  unitId    String?
+  unit      Unit?    @relation("VideoUnit", fields: [unitId], references: [id])
+  teacherId String
+  teacher   User     @relation("VideoTeacher", fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+
+  checkpoints VideoCheckpoint[]
+}
+
+model VideoCheckpoint {
+  id            String     @id @default(uuid())
+  videoId       String
+  video         Video      @relation(fields: [videoId], references: [id])
+  timeInSeconds Int
+  questions     Question[] @relation("CheckpointQuestions")
+  createdAt     DateTime   @default(now())
+}
+
+model Question {
+  id            String   @id @default(uuid())
+  imageUrl      String
+  correctAnswer String
+  topicId       String?
+  topic         Topic?   @relation("QuestionTopic", fields: [topicId], references: [id])
+  chapterId     String?
+  chapter       Chapter? @relation("QuestionChapter", fields: [chapterId], references: [id])
+  unitId        String?
+  unit          Unit?    @relation("QuestionUnit", fields: [unitId], references: [id])
+  teacherId     String
+  teacher       User     @relation("QuestionTeacher", fields: [teacherId], references: [id])
+  createdAt     DateTime @default(now())
+
+  checkpoints    VideoCheckpoint[] @relation("CheckpointQuestions")
+  quizzes        QuizQuestion[]
+}
+
+// ---------------- Quizzes ----------------
+
+model Quiz {
+  id        String   @id @default(uuid())
+  title     String
+  teacherId String
+  teacher   User     @relation("QuizTeacher", fields: [teacherId], references: [id])
+  duration  Int // minutes
+  startTime DateTime?
+  endTime   DateTime?
+  createdAt DateTime @default(now())
+
+  groups      QuizGroup[]
+  questions   QuizQuestion[]
+  submissions QuizSubmission[]
+}
+
+model QuizGroup {
+  id      String @id @default(uuid())
+  quizId  String
+  quiz    Quiz   @relation(fields: [quizId], references: [id])
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id])
+
+  @@unique([quizId, groupId])
+}
+
+model QuizQuestion {
+  id         String   @id @default(uuid())
+  quizId     String
+  quiz       Quiz     @relation(fields: [quizId], references: [id])
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+
+  @@unique([quizId, questionId])
+}
+
+model QuizSubmission {
+  id          String    @id @default(uuid())
+  quizId      String
+  quiz        Quiz      @relation(fields: [quizId], references: [id])
+  studentId   String
+  student     User      @relation(fields: [studentId], references: [id])
+  answers     Json // [{ questionId, answer, isCorrect }]
+  score       Float     @default(0)
+  startedAt   DateTime  @default(now())
+  submittedAt DateTime?
+  isSubmitted Boolean   @default(false)
+}
+
+// In-class quick quizzes (teacher-graded groups of students, not question-bank based)
+model InClassQuiz {
+  id          String   @id @default(uuid())
+  teacherId   String
+  yearId      String
+  groupId     String
+  quizName    String
+  date        DateTime
+  gradeOutOf  Float
+  studentGrades Json // [{ studentId, grade, percentage, letterGrade }]
+  createdAt   DateTime @default(now())
+}
+
+model QuizStopQuestion {
+  id            String   @id @default(uuid())
+  imageUrl      String
+  correctAnswer String
+  yearId        String
+  unitId        String
+  chapterId     String
+  teacherId     String
+  createdAt     DateTime @default(now())
+}
+
+// ---------------- Sessions & Live Grading ----------------
+
+model Session {
+  id        String   @id @default(uuid())
+  title     String
+  date      DateTime @default(now())
+  teacherId String
+  teacher   User     @relation("SessionTeacher", fields: [teacherId], references: [id])
+  yearId    String
+  groupId   String
+  group     Group    @relation(fields: [groupId], references: [id])
+  createdAt DateTime @default(now())
+
+  attendance    SessionAttendance[]
+  liveQuestions LiveQuestion[]
+}
+
+model SessionAttendance {
+  id        String           @id @default(uuid())
+  sessionId String
+  session   Session          @relation(fields: [sessionId], references: [id])
+  studentId String
+  student   User             @relation(fields: [studentId], references: [id])
+  status    AttendanceStatus @default(ABSENT)
+
+  @@unique([sessionId, studentId])
+}
+
+// Requirement #3: teacher poses a question worth X marks during a session;
+// student photographs their handwritten answer and uploads it; assistant grades it.
+model LiveQuestion {
+  id         String   @id @default(uuid())
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id])
+  prompt     String // question text or reference
+  gradeOutOf Float
+  createdAt  DateTime @default(now())
+
+  answers LiveQuestionAnswer[]
+}
+
+model LiveQuestionAnswer {
+  id             String        @id @default(uuid())
+  liveQuestionId String
+  liveQuestion   LiveQuestion  @relation(fields: [liveQuestionId], references: [id])
+  studentId      String
+  student        User          @relation("StudentLiveAnswers", fields: [studentId], references: [id])
+  answerImageUrl String
+  grade          Float?
+  status         GradingStatus @default(PENDING)
+  gradedById     String?
+  gradedBy       User?         @relation("GradedBy", fields: [gradedById], references: [id])
+  gradedAt       DateTime?
+  submittedAt    DateTime      @default(now())
+
+  @@unique([liveQuestionId, studentId])
+}
+
+// ---------------- Homework / Tasks / Delegation ----------------
+
+model Task {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  teacherId   String
+  teacher     User     @relation("TaskTeacher", fields: [teacherId], references: [id])
+  yearId      String
+  deadline    DateTime
+  gradeOutOf  Float
+  createdAt   DateTime @default(now())
+
+  groups      TaskGroup[]
+  submissions Submission[]
+}
+
+model TaskGroup {
+  id      String @id @default(uuid())
+  taskId  String
+  task    Task   @relation(fields: [taskId], references: [id])
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id])
+
+  @@unique([taskId, groupId])
+}
+
+model Submission {
+  id                String    @id @default(uuid())
+  taskId            String
+  task              Task      @relation(fields: [taskId], references: [id])
+  studentId         String
+  student           User      @relation("StudentSubmissions", fields: [studentId], references: [id])
+  fileUrl           String?
+  submittedAt       DateTime  @default(now())
+  grade             Float?
+  comments          String?
+  correctedFileUrl  String?
+  gradedAt          DateTime?
+
+  delegation Delegation?
+}
+
+// Requirement #9: delegate submitted papers to assistants for grading,
+// with tracking per assistant per period (for salary calc).
+model Delegation {
+  id            String    @id @default(uuid())
+  submissionId  String    @unique
+  submission    Submission @relation(fields: [submissionId], references: [id])
+  assistantId   String
+  assistant     User      @relation("AssistantDelegations", fields: [assistantId], references: [id])
+  delegatedById String
+  delegatedBy   User      @relation("DelegatedBy", fields: [delegatedById], references: [id])
+  delegatedAt   DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([assistantId, delegatedAt])
+}
+
+// ---------------- Tickets / Support ----------------
+
+model TicketCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  tickets Ticket[]
+}
+
+model Ticket {
+  id         String            @id @default(uuid())
+  createdById String
+  createdBy   User             @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  categoryId  String
+  category    TicketCategory   @relation(fields: [categoryId], references: [id])
+  subject     String
+
+  // Auto-filled from the student's group's AssistantGroupAssignment
+  assignedAssistantId String?
+  assignedAssistant    User?   @relation("TicketAssignedTo", fields: [assignedAssistantId], references: [id])
+
+  status                   ResolutionStatus @default(OPEN)
+  studentConfirmedResolved Boolean?         // null = not asked yet, true/false = student's answer
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages TicketMessage[]
+}
+
+model TicketMessage {
+  id         String     @id @default(uuid())
+  ticketId   String
+  ticket     Ticket     @relation(fields: [ticketId], references: [id])
+  senderId   String
+  sender     User       @relation(fields: [senderId], references: [id])
+  senderType SenderType
+  content    String
+  createdAt  DateTime   @default(now())
+}
+
+// ---------------- Notifications ----------------
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String
+  link      String? // deep link within the app
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+}
+
+model PushToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  expoToken  String   @unique
+  platform   String // "ios" | "android" | "web"
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+}
