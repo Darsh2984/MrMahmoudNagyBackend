@@ -203,7 +203,6 @@ model Unit {
   chapters  Chapter[]
   materials Material[] @relation("MaterialUnit")
   videos    Video[]    @relation("VideoUnit")
-  questions Question[] @relation("QuestionUnit")
 }
 
 model Chapter {
@@ -216,7 +215,6 @@ model Chapter {
   topics    Topic[]
   materials Material[] @relation("MaterialChapter")
   videos    Video[]    @relation("VideoChapter")
-  questions Question[] @relation("QuestionChapter")
 }
 
 // NEW level in the hierarchy — most resources attach here
@@ -229,7 +227,9 @@ model Topic {
 
   materials Material[] @relation("MaterialTopic")
   videos    Video[]    @relation("VideoTopic")
-  questions Question[] @relation("QuestionTopic")
+  // A question can tag multiple topics, and a topic can have many questions tagged
+  // to it — this is a real many-to-many, unlike Material/Video's single-attachment.
+  questionTags QuestionTopic[]
 }
 
 // ---------------- Resources ----------------
@@ -277,22 +277,47 @@ model VideoCheckpoint {
   createdAt     DateTime   @default(now())
 }
 
-model Question {
-  id            String   @id @default(uuid())
-  imageUrl      String
-  correctAnswer String
-  topicId       String?
-  topic         Topic?   @relation("QuestionTopic", fields: [topicId], references: [id])
-  chapterId     String?
-  chapter       Chapter? @relation("QuestionChapter", fields: [chapterId], references: [id])
-  unitId        String?
-  unit          Unit?    @relation("QuestionUnit", fields: [unitId], references: [id])
-  teacherId     String
-  teacher       User     @relation("QuestionTeacher", fields: [teacherId], references: [id])
-  createdAt     DateTime @default(now())
+enum QuestionType {
+  MCQ
+  WRITTEN
+}
 
-  checkpoints    VideoCheckpoint[] @relation("CheckpointQuestions")
-  quizzes        QuizQuestion[]
+model Question {
+  id        String       @id @default(uuid())
+  type      QuestionType
+
+  // Always required — the question itself, uploaded as a PDF.
+  questionFileUrl String
+
+  // MCQ-only: the correct option.
+  correctAnswer String? // "A" | "B" | "C" | "D" — required when type == MCQ
+
+  // WRITTEN-only: the markscheme, also a PDF, since these are graded manually
+  // against it rather than auto-checked like an MCQ.
+  markschemeFileUrl String? // required when type == WRITTEN
+
+  teacherId String
+  teacher   User     @relation("QuestionTeacher", fields: [teacherId], references: [id])
+  createdAt DateTime @default(now())
+
+  // A question can tag multiple topics from the hierarchy (per spec — e.g. a question
+  // might span two related topics). This is what will eventually let a student ask
+  // "give me practice questions about topic X."
+  topics QuestionTopic[]
+
+  checkpoints VideoCheckpoint[] @relation("CheckpointQuestions")
+  quizzes     QuizQuestion[]
+}
+
+/** Join table for Question <-> Topic many-to-many tagging. */
+model QuestionTopic {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  topicId    String
+  topic      Topic    @relation(fields: [topicId], references: [id])
+
+  @@unique([questionId, topicId])
 }
 
 // ---------------- Quizzes ----------------

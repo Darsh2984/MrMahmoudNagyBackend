@@ -16,6 +16,22 @@ const materialUpload = multer({
   },
 });
 
+// Questions: always a questionFile (PDF), plus an optional markschemeFile (PDF, for
+// WRITTEN-type questions only — MCQs just have a correctAnswer, no markscheme file).
+const questionUpload = multer({
+  storage: memoryStorage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== "application/pdf") {
+      return cb({ status: 400, msg: "Questions and markschemes must be uploaded as PDF" });
+    }
+    cb(null, true);
+  },
+}).fields([
+  { name: "questionFile", maxCount: 1 },
+  { name: "markschemeFile", maxCount: 1 },
+]);
+
 const videoUpload = multer({
   storage: memoryStorage,
   limits: { fileSize: 500 * 1024 * 1024 }, // 500MB cap for videos
@@ -27,4 +43,4 @@ const videoUpload = multer({
   },
 });
 
-module.exports = { materialUpload, videoUpload };
+module.exports = { materialUpload, videoUpload, questionUpload };
