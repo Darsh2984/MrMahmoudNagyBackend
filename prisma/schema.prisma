@@ -119,6 +119,7 @@ model User {
   liveAnswers        LiveQuestionAnswer[] @relation("StudentLiveAnswers")
   attendanceRecords  SessionAttendance[]
   ticketsCreated     Ticket[]            @relation("TicketCreatedBy")
+  ticketCategoriesCreated TicketCategory[] @relation("TicketCategoryCreatedBy")
 
   // Relations (as assistant)
   groupAssignments      AssistantGroupAssignment[]
@@ -491,6 +492,8 @@ model TicketCategory {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
+  createdById String?
+  createdBy   User?    @relation("TicketCategoryCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
 
   tickets Ticket[]

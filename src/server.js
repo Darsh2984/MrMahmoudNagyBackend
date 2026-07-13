@@ -8,6 +8,21 @@ dotenv.config();
 
 const authenticate = require("./middleware/auth.middleware");
 const authRoutes = require("./routes/auth.routes");
+const unitRoutes = require("./routes/unit.routes");
+const chapterRoutes = require("./routes/chapter.routes");
+const topicRoutes = require("./routes/topic.routes");
+const resourceRoutes = require("./routes/resource.routes");
+const groupRoutes = require("./routes/group.routes");
+const assistantAssignmentRoutes = require("./routes/assistantAssignment.routes");
+const studentRoutes = require("./routes/student.routes");
+const sessionRoutes = require("./routes/session.routes");
+const liveQuestionRoutes = require("./routes/liveQuestion.routes");
+const taskRoutes = require("./routes/task.routes");
+const submissionRoutes = require("./routes/submission.routes");
+const delegationRoutes = require("./routes/delegation.routes");
+const ticketCategoryRoutes = require("./routes/ticketCategory.routes");
+const ticketRoutes = require("./routes/ticket.routes");
+const assistantStatsRoutes = require("./routes/assistantStats.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -19,15 +34,49 @@ app.use(express.json());
 app.use(authenticate); // attaches req.user (or null) on every request
 
 app.use("/api/auth", authRoutes);
+app.use("/api/units", unitRoutes);
+app.use("/api/chapters", chapterRoutes);
+app.use("/api/topics", topicRoutes);
+app.use("/api/resources", resourceRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/assistant-assignments", assistantAssignmentRoutes);
+app.use("/api/students", studentRoutes);
+app.use("/api/sessions", sessionRoutes);
+app.use("/api/live-questions", liveQuestionRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/submissions", submissionRoutes);
+app.use("/api/delegations", delegationRoutes);
+app.use("/api/ticket-categories", ticketCategoryRoutes);
+app.use("/api/tickets", ticketRoutes);
+app.use("/api/assistant-stats", assistantStatsRoutes);
 
-// Additional route modules get mounted here as each phase is built:
-// app.use("/api/units", require("./routes/unit.routes"));
-// app.use("/api/tickets", require("./routes/ticket.routes"));
-// ...etc, see PROJECT_SPEC.md Phase checklist.
+// Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 
 io.on("connection", (socket) => {
   console.log("Socket connected:", socket.id);
-  // Ticket room join/leave logic to be ported from old server.js in Phase 3.
+
+  // Client joins a room named after the ticket ID as soon as they open that ticket's
+  // thread — ticketMessage.service.js emits "new-ticket-message" to this room.
+  socket.on("join-ticket", ({ ticketId }) => {
+    socket.join(ticketId);
+  });
+
+  socket.on("leave-ticket", ({ ticketId }) => {
+    socket.leave(ticketId);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Socket disconnected:", socket.id);
+  });
+});
+
+// Multer (file upload) errors arrive as plain objects/errors, not JSON responses by
+// default — normalize them here so the frontend always gets consistent JSON.
+app.use((err, req, res, next) => {
+  if (err) {
+    return res.status(err.status || 400).json({ msg: err.msg || err.message || "Upload error" });
+  }
+  next();
 });
 
 const PORT = process.env.PORT || 6000;
