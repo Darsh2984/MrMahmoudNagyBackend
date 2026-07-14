@@ -72,6 +72,15 @@ async function resetPassword(req, res) {
   }
 }
 
+async function getCurrentUser(req, res) {
+  try {
+    const user = await authService.getCurrentUser(req.user.id);
+    res.json(user);
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error fetching current user" });
+  }
+}
+
 module.exports = {
   registerStudent,
   createAssistant,
@@ -81,4 +90,5 @@ module.exports = {
   lookupByAccessCode,
   forgotPassword,
   resetPassword,
+  getCurrentUser,
 };

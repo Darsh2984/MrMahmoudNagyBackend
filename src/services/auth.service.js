@@ -187,6 +187,25 @@ async function resetPassword(token, newPassword) {
   return { msg: "Password reset successful. Please log in." };
 }
 
+async function getCurrentUser(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isHeadAssistant: true,
+      managedByHeadId: true,
+      accessCode: true,
+      attendanceMode: true,
+      permissions: true,
+    },
+  });
+  if (!user) throw { status: 404, msg: "User not found" };
+  return user;
+}
+
 module.exports = {
   registerStudent,
   createAssistant,
@@ -196,4 +215,5 @@ module.exports = {
   lookupByAccessCode,
   forgotPassword,
   resetPassword,
+  getCurrentUser,
 };
