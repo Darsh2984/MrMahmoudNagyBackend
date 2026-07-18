@@ -8,7 +8,7 @@ const performanceService = require("./performance.service");
 
 const SALT_ROUNDS = 10;
 
-async function registerStudent({ name, email, password, schoolId, attendanceMode, studentPhone }) {
+async function registerStudent({ name, email, password, schoolId, attendanceMode, studentPhone, fatherName, fatherPhone, motherName, motherPhone }) {
   const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (existing) throw { status: 400, msg: "User already exists" };
 
@@ -28,6 +28,10 @@ async function registerStudent({ name, email, password, schoolId, attendanceMode
       schoolId: schoolId || null,
       attendanceMode: attendanceMode || null,
       phone: studentPhone || null,
+      fatherName: fatherName || null,
+      fatherPhone: fatherPhone || null,
+      motherName: motherName || null,
+      motherPhone: motherPhone || null,
       accessCode,
     },
   });
@@ -200,10 +204,34 @@ async function getCurrentUser(userId) {
       accessCode: true,
       attendanceMode: true,
       permissions: true,
+      // Only meaningful for STUDENT, but harmless/empty for other roles — this is
+      // what lets the frontend gate a student with no group to a "waiting" screen.
+      groupMemberships: { select: { id: true } },
     },
   });
   if (!user) throw { status: 404, msg: "User not found" };
   return user;
+}
+
+async function listAssistants() {
+  return prisma.user.findMany({
+    where: { role: "ASSISTANT" },
+    select: { id: true, name: true, email: true, isHeadAssistant: true, managedByHeadId: true, permissions: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+/** Teacher/Head can set permission flags for a regular assistant. Heads are always fully permitted (see rbac.middleware), so this is a no-op for them in practice — kept simple by allowing it anyway rather than special-casing. */
+async function updateAssistantPermissions(assistantId, permissions) {
+  const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
+  if (!assistant || assistant.role !== "ASSISTANT") throw { status: 404, msg: "Assistant not found" };
+  return prisma.user.update({ where: { id: assistantId }, data: { permissions } });
+}
+
+async function deleteAssistant(assistantId) {
+  const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
+  if (!assistant || assistant.role !== "ASSISTANT") throw { status: 404, msg: "Assistant not found" };
+  return prisma.user.delete({ where: { id: assistantId } });
 }
 
 module.exports = {
@@ -211,6 +239,9 @@ module.exports = {
   createAssistant,
   promoteToHead,
   demoteFromHead,
+  listAssistants,
+  updateAssistantPermissions,
+  deleteAssistant,
   login,
   lookupByAccessCode,
   forgotPassword,

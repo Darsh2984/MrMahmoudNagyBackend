@@ -2,6 +2,11 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const http = require("http");
+const jwt = require("jsonwebtoken");
+const prisma = require("./config/prisma");
+const {
+  assertTicketAccess,
+} = require("./services/ticket.service");
 const { Server } = require("socket.io");
 
 dotenv.config();
@@ -74,21 +79,192 @@ app.use("/api/dashboard", dashboardSummaryRoutes);
 
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 
+io.use(async (socket, next) => {
+  try {
+    const rawToken =
+      socket.handshake.auth?.token ||
+      socket.handshake.headers?.authorization;
+
+    const token =
+      typeof rawToken === "string" &&
+      rawToken.startsWith("Bearer ")
+        ? rawToken.slice(7)
+        : rawToken;
+
+    if (!token) {
+      return next(
+        new Error("Authentication required")
+      );
+    }
+
+    const decoded = jwt.verify(
+      token,
+      process.env.JWT_SECRET
+    );
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: decoded.id,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        isHeadAssistant: true,
+      },
+    });
+
+    if (!user) {
+      return next(
+        new Error("User not found")
+      );
+    }
+
+    socket.user = user;
+
+    next();
+  } catch (error) {
+    next(new Error("Invalid authentication token"));
+  }
+});
+
 io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
+  console.log(
+    `Socket connected: ${socket.id} (${socket.user.name})`
+  );
 
-  // Client joins a room named after the ticket ID as soon as they open that ticket's
-  // thread — ticketMessage.service.js emits "new-ticket-message" to this room.
-  socket.on("join-ticket", ({ ticketId }) => {
-    socket.join(ticketId);
-  });
+  socket.on(
+    "join-ticket",
+    async ({ ticketId }, callback) => {
+      try {
+        if (!ticketId) {
+          throw {
+            status: 400,
+            msg: "Ticket ID is required",
+          };
+        }
 
-  socket.on("leave-ticket", ({ ticketId }) => {
-    socket.leave(ticketId);
+        const ticket =
+          await prisma.ticket.findUnique({
+            where: {
+              id: String(ticketId),
+            },
+
+            select: {
+              id: true,
+              createdById: true,
+              assignedAssistantId: true,
+            },
+          });
+
+        if (!ticket) {
+          throw {
+            status: 404,
+            msg: "Ticket not found",
+          };
+        }
+
+        assertTicketAccess(
+          ticket,
+          socket.user
+        );
+
+        socket.join(String(ticketId));
+
+        callback?.({
+          ok: true,
+        });
+      } catch (error) {
+        callback?.({
+          ok: false,
+          msg:
+            error.msg ||
+            "Unable to join ticket",
+        });
+      }
+    }
+  );
+
+  socket.on(
+    "ticket-typing-start",
+    ({ ticketId }) => {
+      if (
+        !ticketId ||
+        !socket.rooms.has(String(ticketId))
+      ) {
+        return;
+      }
+
+      socket
+        .to(String(ticketId))
+        .emit("ticket-user-typing", {
+          ticketId: String(ticketId),
+          user: socket.user,
+          isTyping: true,
+        });
+    }
+  );
+
+  socket.on(
+    "ticket-typing-stop",
+    ({ ticketId }) => {
+      if (
+        !ticketId ||
+        !socket.rooms.has(String(ticketId))
+      ) {
+        return;
+      }
+
+      socket
+        .to(String(ticketId))
+        .emit("ticket-user-typing", {
+          ticketId: String(ticketId),
+          user: socket.user,
+          isTyping: false,
+        });
+    }
+  );
+
+  socket.on(
+    "leave-ticket",
+    ({ ticketId }) => {
+      if (!ticketId) {
+        return;
+      }
+
+      socket
+        .to(String(ticketId))
+        .emit("ticket-user-typing", {
+          ticketId: String(ticketId),
+          user: socket.user,
+          isTyping: false,
+        });
+
+      socket.leave(String(ticketId));
+    }
+  );
+
+  socket.on("disconnecting", () => {
+    for (const room of socket.rooms) {
+      if (room === socket.id) {
+        continue;
+      }
+
+      socket
+        .to(room)
+        .emit("ticket-user-typing", {
+          ticketId: room,
+          user: socket.user,
+          isTyping: false,
+        });
+    }
   });
 
   socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
+    console.log(
+      `Socket disconnected: ${socket.id}`
+    );
   });
 });
 

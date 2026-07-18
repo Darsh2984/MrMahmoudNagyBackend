@@ -19,8 +19,10 @@ async function exportUsersWorkbook() {
     { header: "Phone Number", key: "phone", width: 20 },
     { header: "School", key: "school", width: 25 },
     { header: "Access Code", key: "accessCode", width: 15 },
-    { header: "Parent Name", key: "parentName", width: 25 },
-    { header: "Parent Phone", key: "parentPhone", width: 20 },
+    { header: "Father Name", key: "fatherName", width: 22 },
+    { header: "Father Phone", key: "fatherPhone", width: 18 },
+    { header: "Mother Name", key: "motherName", width: 22 },
+    { header: "Mother Phone", key: "motherPhone", width: 18 },
   ];
 
   users.forEach((u) => {
@@ -31,8 +33,10 @@ async function exportUsersWorkbook() {
       phone: u.phone || "N/A",
       school: u.school?.name || "N/A",
       accessCode: u.accessCode || "N/A",
-      parentName: u.parentName || "N/A",
-      parentPhone: u.parentPhone || "N/A",
+      fatherName: u.fatherName || "N/A",
+      fatherPhone: u.fatherPhone || "N/A",
+      motherName: u.motherName || "N/A",
+      motherPhone: u.motherPhone || "N/A",
     });
   });
 
@@ -55,8 +59,10 @@ async function exportStudentsWorkbook() {
     { header: "School", key: "school", width: 25 },
     { header: "Access Code", key: "accessCode", width: 15 },
     { header: "Attendance Mode", key: "attendanceMode", width: 18 },
-    { header: "Parent Name", key: "parentName", width: 25 },
-    { header: "Parent Phone", key: "parentPhone", width: 20 },
+    { header: "Father Name", key: "fatherName", width: 22 },
+    { header: "Father Phone", key: "fatherPhone", width: 18 },
+    { header: "Mother Name", key: "motherName", width: 22 },
+    { header: "Mother Phone", key: "motherPhone", width: 18 },
   ];
 
   students.forEach((s) => {
@@ -67,8 +73,10 @@ async function exportStudentsWorkbook() {
       school: s.school?.name || "N/A",
       accessCode: s.accessCode || "N/A",
       attendanceMode: s.attendanceMode || "N/A",
-      parentName: s.parentName || "N/A",
-      parentPhone: s.parentPhone || "N/A",
+      fatherName: s.fatherName || "N/A",
+      fatherPhone: s.fatherPhone || "N/A",
+      motherName: s.motherName || "N/A",
+      motherPhone: s.motherPhone || "N/A",
     });
   });
 

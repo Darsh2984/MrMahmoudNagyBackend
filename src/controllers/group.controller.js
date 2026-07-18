@@ -11,21 +11,38 @@ async function createGroup(req, res) {
 
 async function listGroupsByYear(req, res) {
   try {
-    const groups = await groupService.listGroupsByYear(req.params.yearId);
+    const groups = await groupService.listGroupsByYear(
+      req.params.yearId,
+      req.user
+    );
+
     res.json(groups);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error listing groups" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg: err.msg || "Error listing groups",
+      });
   }
 }
 
 async function getGroup(req, res) {
   try {
-    const group = await groupService.getGroupWithMembers(req.params.groupId);
+    const group = await groupService.getGroupWithMembers(
+      req.params.groupId,
+      req.user
+    );
+
     res.json(group);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error fetching group" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg: err.msg || "Error fetching group",
+      });
   }
 }
+
 
 async function updateGroup(req, res) {
   try {

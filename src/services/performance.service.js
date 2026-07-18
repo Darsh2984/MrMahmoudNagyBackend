@@ -98,8 +98,10 @@ async function exportGroupPerformanceWorkbook(groupId) {
   worksheet.columns = [
     { header: "Student Name", key: "studentName", width: 25 },
     { header: "Student Phone", key: "studentPhone", width: 20 },
-    { header: "Parent Name", key: "parentName", width: 25 },
-    { header: "Parent Phone", key: "parentPhone", width: 20 },
+    { header: "Father Name", key: "fatherName", width: 22 },
+    { header: "Father Phone", key: "fatherPhone", width: 18 },
+    { header: "Mother Name", key: "motherName", width: 22 },
+    { header: "Mother Phone", key: "motherPhone", width: 18 },
     ...sessions.map((s) => ({ header: `Session: ${s.title}`, key: `session_${s.id}`, width: 18 })),
     ...tasks.map((t) => ({ header: `Task: ${t.title}`, key: `task_${t.id}`, width: 25 })),
     ...quizzes.map((q) => ({ header: `Quiz: ${q.title}`, key: `quiz_${q.id}`, width: 20 })),
@@ -112,8 +114,10 @@ async function exportGroupPerformanceWorkbook(groupId) {
     const row = {
       studentName: student.name,
       studentPhone: student.phone || "N/A",
-      parentName: student.parentName || "N/A",
-      parentPhone: student.parentPhone || "N/A",
+      fatherName: student.fatherName || "N/A",
+      fatherPhone: student.fatherPhone || "N/A",
+      motherName: student.motherName || "N/A",
+      motherPhone: student.motherPhone || "N/A",
     };
 
     for (const s of sessions) {

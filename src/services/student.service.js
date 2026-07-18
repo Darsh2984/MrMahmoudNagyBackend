@@ -17,28 +17,90 @@ async function setAttendanceMode(studentId, attendanceMode) {
 
 async function getStudentProfile(studentId) {
   const student = await prisma.user.findUnique({
-    where: { id: studentId },
+    where: {
+      id: studentId,
+    },
     select: {
       id: true,
       name: true,
       email: true,
+      phone: true,
+      role: true,
       attendanceMode: true,
       accessCode: true,
       schoolId: true,
+      school: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      fatherName: true,
+      fatherPhone: true,
+      motherName: true,
+      motherPhone: true,
       groupMemberships: {
-        include: { group: { select: { id: true, name: true, year: { select: { id: true, name: true } } } } },
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+              year: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
       },
     },
   });
-  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
+
+  if (!student || student.role !== "STUDENT") {
+    throw {
+      status: 404,
+      msg: "Student not found",
+    };
+  }
+
   return student;
 }
 
 /** Students not yet in any group — no parent-account creation logic anymore (access-code model instead). */
 async function listUnassignedStudents() {
   return prisma.user.findMany({
-    where: { role: "STUDENT", groupMemberships: { none: {} } },
-    select: { id: true, name: true, email: true, accessCode: true, schoolId: true },
+    where: {
+      role: "STUDENT",
+      groupMemberships: {
+        none: {},
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      accessCode: true,
+      schoolId: true,
+      school: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: [
+      {
+        school: {
+          name: "asc",
+        },
+      },
+      {
+        name: "asc",
+      },
+    ],
   });
 }
 
@@ -47,7 +109,7 @@ async function listUnassignedStudents() {
  * managed a separate Parent user record here; that's gone now (access-code model),
  * so parentName/parentPhone are just plain fields on the student.
  */
-async function updateStudent(studentId, { name, email, studentPhone, parentName, parentPhone }) {
+async function updateStudent(studentId, { name, email, studentPhone, fatherName, fatherPhone, motherName, motherPhone }) {
   const student = await prisma.user.findUnique({ where: { id: studentId } });
   if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
 
@@ -56,9 +118,11 @@ async function updateStudent(studentId, { name, email, studentPhone, parentName,
     data: {
       ...(name ? { name } : {}),
       ...(email ? { email: email.toLowerCase() } : {}),
-      ...(studentPhone ? { phone: studentPhone } : {}),
-      ...(parentName ? { parentName } : {}),
-      ...(parentPhone ? { parentPhone } : {}),
+      ...(studentPhone !== undefined ? { phone: studentPhone || null } : {}),
+      ...(fatherName !== undefined ? { fatherName: fatherName || null } : {}),
+      ...(fatherPhone !== undefined ? { fatherPhone: fatherPhone || null } : {}),
+      ...(motherName !== undefined ? { motherName: motherName || null } : {}),
+      ...(motherPhone !== undefined ? { motherPhone: motherPhone || null } : {}),
     },
   });
 }

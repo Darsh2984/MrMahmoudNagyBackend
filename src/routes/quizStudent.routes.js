@@ -6,6 +6,7 @@ const { materialUpload } = require("../middleware/upload.middleware");
 
 router.get("/mine", requireRole("STUDENT"), quizStudentController.listMyQuizzes);
 router.post("/:quizId/start", requireRole("STUDENT"), quizStudentController.startQuiz);
+router.get("/:quizId/take", requireRole("STUDENT"), quizStudentController.getQuizForTaking);
 
 // Per-question answer — MCQ sends { answerText } as JSON, WRITTEN sends a photo file.
 // materialUpload accepts both PDF/image, matching how written answers get captured elsewhere.

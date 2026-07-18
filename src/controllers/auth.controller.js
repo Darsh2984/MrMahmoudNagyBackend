@@ -81,11 +81,41 @@ async function getCurrentUser(req, res) {
   }
 }
 
+async function listAssistants(req, res) {
+  try {
+    const assistants = await authService.listAssistants();
+    res.json(assistants);
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error listing assistants" });
+  }
+}
+
+async function updateAssistantPermissions(req, res) {
+  try {
+    const user = await authService.updateAssistantPermissions(req.params.assistantId, req.body.permissions);
+    res.json({ msg: "Permissions updated", user });
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error updating permissions" });
+  }
+}
+
+async function deleteAssistant(req, res) {
+  try {
+    await authService.deleteAssistant(req.params.assistantId);
+    res.json({ msg: "Assistant deleted" });
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error deleting assistant" });
+  }
+}
+
 module.exports = {
   registerStudent,
   createAssistant,
   promoteToHead,
   demoteFromHead,
+  listAssistants,
+  updateAssistantPermissions,
+  deleteAssistant,
   login,
   lookupByAccessCode,
   forgotPassword,

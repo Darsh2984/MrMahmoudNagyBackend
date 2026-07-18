@@ -6,23 +6,95 @@ async function createGroup({ name, yearId }) {
   return prisma.group.create({ data: { name, yearId } });
 }
 
-async function listGroupsByYear(yearId) {
+async function listGroupsByYear(yearId, viewer) {
+  const isRegularAssistant =
+    viewer.role === "ASSISTANT" &&
+    !viewer.isHeadAssistant;
+
   return prisma.group.findMany({
-    where: { yearId },
-    orderBy: { createdAt: "asc" },
-    include: { _count: { select: { members: true } } },
+    where: {
+      yearId,
+
+      ...(isRegularAssistant
+        ? {
+            assistantAssignments: {
+              some: {
+                assistantId: viewer.id,
+              },
+            },
+          }
+        : {}),
+    },
+
+    orderBy: {
+      createdAt: "asc",
+    },
+
+    include: {
+      _count: {
+        select: {
+          members: true,
+        },
+      },
+    },
   });
 }
 
-async function getGroupWithMembers(groupId) {
-  const group = await prisma.group.findUnique({
-    where: { id: groupId },
+async function getGroupWithMembers(groupId, viewer) {
+  const isRegularAssistant =
+    viewer.role === "ASSISTANT" &&
+    !viewer.isHeadAssistant;
+
+  const group = await prisma.group.findFirst({
+    where: {
+      id: groupId,
+
+      ...(isRegularAssistant
+        ? {
+            assistantAssignments: {
+              some: {
+                assistantId: viewer.id,
+              },
+            },
+          }
+        : {}),
+    },
+
     include: {
-      members: { include: { student: { select: { id: true, name: true, email: true, attendanceMode: true } } } },
-      assistantAssignments: { include: { assistant: { select: { id: true, name: true, isHeadAssistant: true } } } },
+      members: {
+        include: {
+          student: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              attendanceMode: true,
+            },
+          },
+        },
+      },
+
+      assistantAssignments: {
+        include: {
+          assistant: {
+            select: {
+              id: true,
+              name: true,
+              isHeadAssistant: true,
+            },
+          },
+        },
+      },
     },
   });
-  if (!group) throw { status: 404, msg: "Group not found" };
+
+  if (!group) {
+    throw {
+      status: 404,
+      msg: "Group not found or you are not assigned to it",
+    };
+  }
+
   return group;
 }
 

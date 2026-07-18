@@ -73,9 +73,19 @@ async function gradeWrittenAnswer(req, res) {
   }
 }
 
+async function getQuizForTaking(req, res) {
+  try {
+    const quiz = await quizStudentService.getQuizForTaking(req.params.quizId);
+    res.json(quiz);
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error fetching quiz" });
+  }
+}
+
 module.exports = {
   listMyQuizzes,
   startQuiz,
+  getQuizForTaking,
   answerQuestion,
   submitQuiz,
   getMySubmission,

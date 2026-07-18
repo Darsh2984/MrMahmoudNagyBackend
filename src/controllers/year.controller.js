@@ -1,4 +1,15 @@
 const yearService = require("../services/year.service");
+const { resolveTeacherId } = require("../utils/resolveTeacher");
+
+async function listMyYears(req, res) {
+  try {
+    const teacherId = await resolveTeacherId(req.user);
+    const years = await yearService.listYearsForTeacher(teacherId);
+    res.json(years);
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error listing years" });
+  }
+}
 
 async function createYear(req, res) {
   try {
@@ -63,4 +74,4 @@ async function getZoomLinks(req, res) {
   }
 }
 
-module.exports = { createYear, listYearsForTeacher, getYear, updateYear, deleteYear, updateZoomLinks, getZoomLinks };
+module.exports = { createYear, listYearsForTeacher, listMyYears, getYear, updateYear, deleteYear, updateZoomLinks, getZoomLinks };

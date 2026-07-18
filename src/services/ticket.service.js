@@ -55,18 +55,63 @@ async function listTicketsForAssistant(assistantId) {
   });
 }
 
-async function getTicketWithMessages(ticketId, user) {
+async function getTicketWithMessages(
+  ticketId,
+  user
+) {
   const ticket = await prisma.ticket.findUnique({
-    where: { id: ticketId },
+    where: {
+      id: ticketId,
+    },
+
     include: {
-      messages: { orderBy: { createdAt: "asc" } },
+      messages: {
+        orderBy: {
+          createdAt: "asc",
+        },
+
+        include: {
+          sender: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              isHeadAssistant: true,
+            },
+          },
+        },
+      },
+
       category: true,
-      createdBy: { select: { id: true, name: true } },
-      assignedAssistant: { select: { id: true, name: true } },
+
+      createdBy: {
+        select: {
+          id: true,
+          name: true,
+          role: true,
+        },
+      },
+
+      assignedAssistant: {
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          isHeadAssistant: true,
+        },
+      },
     },
   });
-  if (!ticket) throw { status: 404, msg: "Ticket not found" };
+
+  if (!ticket) {
+    throw {
+      status: 404,
+      msg: "Ticket not found",
+    };
+  }
+
   assertTicketAccess(ticket, user);
+
   return ticket;
 }
 
@@ -112,10 +157,22 @@ async function confirmResolution(ticketId, studentId, resolved) {
   });
 }
 
+async function listAllTickets() {
+  return prisma.ticket.findMany({
+    orderBy: { updatedAt: "desc" },
+    include: {
+      category: true,
+      createdBy: { select: { id: true, name: true } },
+      assignedAssistant: { select: { id: true, name: true } },
+    },
+  });
+}
+
 module.exports = {
   createTicket,
   listTicketsForStudent,
   listTicketsForAssistant,
+  listAllTickets,
   getTicketWithMessages,
   markResolvedPendingConfirmation,
   confirmResolution,

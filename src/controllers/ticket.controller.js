@@ -59,4 +59,13 @@ async function confirmResolution(req, res) {
   }
 }
 
-module.exports = { createTicket, listMyTickets, listAssignedToMe, getTicket, markResolved, confirmResolution };
+async function getAllTickets(req, res) {
+  try {
+    const tickets = await ticketService.listAllTickets();
+    res.json(tickets);
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Error listing all tickets" });
+  }
+}
+
+module.exports = { createTicket, listMyTickets, listAssignedToMe, getAllTickets, getTicket, markResolved, confirmResolution };

@@ -142,9 +142,25 @@ async function gradeWrittenAnswer({ submissionId, questionId, isCorrect }) {
   });
 }
 
+/** Student-safe: quiz + questions WITHOUT correctAnswer/markscheme, so answering never leaks the key. */
+async function getQuizForTaking(quizId) {
+  const quiz = await prisma.quiz.findUnique({
+    where: { id: quizId },
+    include: { questions: { include: { question: { select: { id: true, type: true, questionFileUrl: true } } } } },
+  });
+  if (!quiz) throw { status: 404, msg: "Quiz not found" };
+  return {
+    id: quiz.id,
+    title: quiz.title,
+    duration: quiz.duration,
+    questions: quiz.questions.map((qq) => qq.question),
+  };
+}
+
 module.exports = {
   listQuizzesForStudent,
   startQuiz,
+  getQuizForTaking,
   answerQuestion,
   submitQuiz,
   getSubmissionDetail,

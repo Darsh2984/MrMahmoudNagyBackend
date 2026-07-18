@@ -56,6 +56,15 @@ enum NotificationType {
   GENERAL
 }
 
+enum TicketMessageType {
+  TEXT
+  IMAGE
+  PDF
+  VIDEO
+  AUDIO
+  FILE
+}
+
 // ---------------- Core: Users & Org structure ----------------
 
 model User {
@@ -93,8 +102,12 @@ model User {
 
   // Contact extras
   phone       String?
-  parentName  String?
-  parentPhone String?
+  // Parent contact — student chooses father only, mother only, or both at
+  // registration. All optional since not every combination is provided.
+  fatherName  String?
+  fatherPhone String?
+  motherName  String?
+  motherPhone String?
 
   resetPasswordToken   String?
   resetPasswordExpires DateTime?
@@ -457,6 +470,12 @@ model Task {
   yearId      String
   deadline    DateTime
   gradeOutOf  Float
+  // Optional PDF of the homework itself, uploaded by teacher/assistant (req: student
+  // sees instructions + this file, if provided).
+  taskFileUrl String?
+  // Editable after creation — teacher/assistant decides whether submissions are
+  // still accepted after the deadline passes. Enforced server-side in submission.service.js.
+  allowLateSubmission Boolean @default(true)
   createdAt   DateTime @default(now())
 
   groups      TaskGroup[]
@@ -540,14 +559,29 @@ model Ticket {
 }
 
 model TicketMessage {
-  id         String     @id @default(uuid())
-  ticketId   String
-  ticket     Ticket     @relation(fields: [ticketId], references: [id])
-  senderId   String
-  sender     User       @relation(fields: [senderId], references: [id])
+  id       String @id @default(uuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id])
+
   senderType SenderType
-  content    String
-  createdAt  DateTime   @default(now())
+
+  messageType TicketMessageType @default(TEXT)
+
+  content String?
+
+  attachmentUrl      String?
+  attachmentName     String?
+  attachmentMimeType String?
+  attachmentSize     Int?
+  audioDuration      Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+  @@index([senderId])
 }
 
 // ---------------- Notifications ----------------

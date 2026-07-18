@@ -7,6 +7,10 @@ async function submitHomework({ taskId, studentId, file }) {
   const task = await prisma.task.findUnique({ where: { id: taskId } });
   if (!task) throw { status: 404, msg: "Task not found" };
 
+  if (!task.allowLateSubmission && new Date() > task.deadline) {
+    throw { status: 400, msg: "The deadline has passed and late submissions are not allowed for this task" };
+  }
+
   const existing = await prisma.submission.findFirst({ where: { taskId, studentId } });
   if (existing) throw { status: 400, msg: "You've already submitted this task" };
 

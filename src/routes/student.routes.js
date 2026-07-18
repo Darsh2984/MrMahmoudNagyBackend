@@ -1,14 +1,43 @@
 const express = require("express");
 const router = express.Router();
+
 const studentController = require("../controllers/student.controller");
-const { requireAuth, requireAdminLevel } = require("../middleware/rbac.middleware");
 
-router.get("/:studentId", requireAuth, studentController.getProfile);
-router.get("/status/unassigned", requireAdminLevel, studentController.listUnassigned);
+const {
+  requireAuth,
+  requireAdminLevel,
+  requireRole,
+} = require("../middleware/rbac.middleware");
 
-// Per spec req #11: onground/online is settable by Teacher or Head of Assistants only.
-router.patch("/:studentId/attendance-mode", requireAdminLevel, studentController.setAttendanceMode);
-router.patch("/:studentId", requireAdminLevel, studentController.updateStudent);
-router.delete("/:studentId", requireAdminLevel, studentController.deleteStudent);
+// Static routes must be before "/:studentId".
+router.get(
+  "/status/unassigned",
+  requireAdminLevel,
+  studentController.listUnassigned
+);
+
+router.patch(
+  "/:studentId/attendance-mode",
+  requireAdminLevel,
+  studentController.setAttendanceMode
+);
+
+router.get(
+  "/:studentId",
+  requireAuth,
+  studentController.getProfile
+);
+
+router.patch(
+  "/:studentId",
+  requireRole("TEACHER", "ASSISTANT"),
+  studentController.updateStudent
+);
+
+router.delete(
+  "/:studentId",
+  requireAdminLevel,
+  studentController.deleteStudent
+);
 
 module.exports = router;

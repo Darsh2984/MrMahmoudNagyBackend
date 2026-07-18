@@ -3,6 +3,7 @@ const router = express.Router();
 const yearController = require("../controllers/year.controller");
 const { requireAuth, requireAdminLevel } = require("../middleware/rbac.middleware");
 
+router.get("/mine", requireAuth, yearController.listMyYears);
 router.get("/teacher/:teacherId", requireAuth, yearController.listYearsForTeacher);
 router.get("/:yearId", requireAuth, yearController.getYear);
 router.get("/:yearId/zoom", requireAuth, yearController.getZoomLinks);
