@@ -51,27 +51,204 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, al
   });
 }
 
-async function listTasksForGroup(groupId) {
+function isAdminLevel(user) {
+  return (
+    user?.role === "TEACHER" ||
+    (
+      user?.role === "ASSISTANT" &&
+      user?.isHeadAssistant === true
+    )
+  );
+}
+
+async function assertGroupAccess(groupId, user) {
+  if (!user) {
+    throw {
+      status: 401,
+      msg: "Unauthorized",
+    };
+  }
+
+  if (isAdminLevel(user)) {
+    return;
+  }
+
+  if (user.role === "STUDENT") {
+    const membership = await prisma.groupMembership.findUnique({
+      where: {
+        groupId_studentId: {
+          groupId,
+          studentId: user.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      throw {
+        status: 403,
+        msg: "You do not have access to this group",
+      };
+    }
+
+    return;
+  }
+
+  if (user.role === "ASSISTANT") {
+    const assignment =
+      await prisma.assistantGroupAssignment.findUnique({
+        where: {
+          assistantId_groupId: {
+            assistantId: user.id,
+            groupId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!assignment) {
+      throw {
+        status: 403,
+        msg: "You are not assigned to this group",
+      };
+    }
+
+    return;
+  }
+
+  throw {
+    status: 403,
+    msg: "You do not have access to this group",
+  };
+}
+
+async function listTasksForGroup(groupId, user) {
+  await assertGroupAccess(groupId, user);
+
   return prisma.task.findMany({
-    where: { groups: { some: { groupId } } },
-    orderBy: { deadline: "asc" },
+    where: {
+      groups: {
+        some: {
+          groupId,
+        },
+      },
+    },
+    orderBy: {
+      deadline: "asc",
+    },
   });
 }
 
-async function getTaskWithSubmissions(taskId) {
+async function getTaskWithSubmissions(taskId, user) {
   const task = await prisma.task.findUnique({
-    where: { id: taskId },
+    where: {
+      id: taskId,
+    },
     include: {
       submissions: {
         include: {
-          student: { select: { id: true, name: true } },
-          delegation: { include: { assistant: { select: { id: true, name: true } } } },
+          student: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          delegation: {
+            include: {
+              assistant: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
         },
       },
-      groups: { include: { group: { select: { id: true, name: true } } } },
+      groups: {
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
     },
   });
-  if (!task) throw { status: 404, msg: "Task not found" };
+
+  if (!task) {
+    throw {
+      status: 404,
+      msg: "Task not found",
+    };
+  }
+
+  const taskGroupIds = task.groups.map(
+    (taskGroup) => taskGroup.groupId,
+  );
+
+  if (!user) {
+    throw {
+      status: 401,
+      msg: "Unauthorized",
+    };
+  }
+
+  if (!isAdminLevel(user)) {
+    if (user.role === "STUDENT") {
+      const membershipCount =
+        await prisma.groupMembership.count({
+          where: {
+            studentId: user.id,
+            groupId: {
+              in: taskGroupIds,
+            },
+          },
+        });
+
+      if (membershipCount === 0) {
+        throw {
+          status: 403,
+          msg: "You do not have access to this task",
+        };
+      }
+
+      // Students must only receive their own submission.
+      task.submissions = task.submissions.filter(
+        (submission) =>
+          submission.studentId === user.id,
+      );
+    } else if (user.role === "ASSISTANT") {
+      const assignmentCount =
+        await prisma.assistantGroupAssignment.count({
+          where: {
+            assistantId: user.id,
+            groupId: {
+              in: taskGroupIds,
+            },
+          },
+        });
+
+      if (assignmentCount === 0) {
+        throw {
+          status: 403,
+          msg: "You are not assigned to this task's groups",
+        };
+      }
+    } else {
+      throw {
+        status: 403,
+        msg: "You do not have access to this task",
+      };
+    }
+  }
+
   return task;
 }
 

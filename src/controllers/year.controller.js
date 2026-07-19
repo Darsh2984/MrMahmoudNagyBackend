@@ -11,31 +11,146 @@ async function listMyYears(req, res) {
   }
 }
 
+async function listYearsForTeacher(
+  teacherId,
+  viewer
+) {
+  if (!viewer) {
+    throw createHttpError(401, "Unauthorized");
+  }
+
+  const isRegularAssistant =
+    viewer.role === "ASSISTANT" &&
+    !viewer.isHeadAssistant;
+
+  const isStudent = viewer.role === "STUDENT";
+
+  return prisma.year.findMany({
+    where: {
+      teacherId,
+
+      ...(isRegularAssistant
+        ? {
+            groups: {
+              some: {
+                assistantAssignments: {
+                  some: {
+                    assistantId: viewer.id,
+                  },
+                },
+              },
+            },
+          }
+        : {}),
+
+      ...(isStudent
+        ? {
+            groups: {
+              some: {
+                members: {
+                  some: {
+                    studentId: viewer.id,
+                  },
+                },
+              },
+            },
+          }
+        : {}),
+    },
+
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+}
+
 async function createYear(req, res) {
   try {
-    const year = await yearService.createYear({ name: req.body.name, teacherId: req.user.id });
+    const teacherId = await resolveTeacherId(req.user);
+
+    const year = await yearService.createYear({
+      name: req.body.name,
+      teacherId,
+    });
+
     res.json({ msg: "Year created", year });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error creating year" });
+    res
+      .status(err.status || 500)
+      .json({ msg: err.msg || "Error creating year" });
   }
 }
 
-async function listYearsForTeacher(req, res) {
+async function listMyYears(req, res) {
   try {
-    const years = await yearService.listYearsForTeacher(req.params.teacherId);
+    const teacherId = await resolveTeacherId(req.user);
+
+    const years = await yearService.listYearsForTeacher(
+      teacherId,
+      req.user
+    );
+
     res.json(years);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error listing years" });
+    res
+      .status(err.status || 500)
+      .json({ msg: err.msg || "Error listing years" });
   }
 }
 
-async function getYear(req, res) {
-  try {
-    const year = await yearService.getYear(req.params.yearId);
-    res.json(year);
-  } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error fetching year" });
+async function getYear(yearId, viewer) {
+  await assertYearAccess(yearId, viewer);
+
+  const isRegularAssistant =
+    viewer.role === "ASSISTANT" &&
+    !viewer.isHeadAssistant;
+
+  const isStudent = viewer.role === "STUDENT";
+
+  const year = await prisma.year.findUnique({
+    where: {
+      id: yearId,
+    },
+
+    include: {
+      groups: {
+        where: {
+          ...(isRegularAssistant
+            ? {
+                assistantAssignments: {
+                  some: {
+                    assistantId: viewer.id,
+                  },
+                },
+              }
+            : {}),
+
+          ...(isStudent
+            ? {
+                members: {
+                  some: {
+                    studentId: viewer.id,
+                  },
+                },
+              }
+            : {}),
+        },
+      },
+
+      units: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+  });
+
+  if (!year) {
+    throw createHttpError(404, "Year not found");
   }
+
+  return year;
 }
 
 async function updateYear(req, res) {
@@ -65,13 +180,23 @@ async function updateZoomLinks(req, res) {
   }
 }
 
-async function getZoomLinks(req, res) {
-  try {
-    const zoomLinks = await yearService.getZoomLinks(req.params.yearId);
-    res.json(zoomLinks);
-  } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error fetching zoom links" });
+async function getZoomLinks(yearId, viewer) {
+  await assertYearAccess(yearId, viewer);
+
+  const year = await prisma.year.findUnique({
+    where: {
+      id: yearId,
+    },
+    select: {
+      zoomLinks: true,
+    },
+  });
+
+  if (!year) {
+    throw createHttpError(404, "Year not found");
   }
+
+  return year.zoomLinks || [];
 }
 
 module.exports = { createYear, listYearsForTeacher, listMyYears, getYear, updateYear, deleteYear, updateZoomLinks, getZoomLinks };

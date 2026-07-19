@@ -11,6 +11,8 @@ async function listGroupsByYear(yearId, viewer) {
     viewer.role === "ASSISTANT" &&
     !viewer.isHeadAssistant;
 
+  const isStudent = viewer.role === "STUDENT";
+
   return prisma.group.findMany({
     where: {
       yearId,
@@ -20,6 +22,16 @@ async function listGroupsByYear(yearId, viewer) {
             assistantAssignments: {
               some: {
                 assistantId: viewer.id,
+              },
+            },
+          }
+        : {}),
+
+      ...(isStudent
+        ? {
+            members: {
+              some: {
+                studentId: viewer.id,
               },
             },
           }
@@ -45,6 +57,8 @@ async function getGroupWithMembers(groupId, viewer) {
     viewer.role === "ASSISTANT" &&
     !viewer.isHeadAssistant;
 
+  const isStudent = viewer.role === "STUDENT";
+
   const group = await prisma.group.findFirst({
     where: {
       id: groupId,
@@ -58,10 +72,26 @@ async function getGroupWithMembers(groupId, viewer) {
             },
           }
         : {}),
+
+      ...(isStudent
+        ? {
+            members: {
+              some: {
+                studentId: viewer.id,
+              },
+            },
+          }
+        : {}),
     },
 
     include: {
       members: {
+        where: isStudent
+          ? {
+              studentId: viewer.id,
+            }
+          : undefined,
+
         include: {
           student: {
             select: {
@@ -74,17 +104,19 @@ async function getGroupWithMembers(groupId, viewer) {
         },
       },
 
-      assistantAssignments: {
-        include: {
-          assistant: {
-            select: {
-              id: true,
-              name: true,
-              isHeadAssistant: true,
+      assistantAssignments: isStudent
+        ? false
+        : {
+            include: {
+              assistant: {
+                select: {
+                  id: true,
+                  name: true,
+                  isHeadAssistant: true,
+                },
+              },
             },
           },
-        },
-      },
     },
   });
 

@@ -20,6 +20,7 @@ async function gradeSubmission(req, res) {
       grade: req.body.grade,
       comments: req.body.comments,
       correctedFile: req.file,
+      gradedBy: req.user,
     });
     res.json({ msg: "Submission graded", submission });
   } catch (err) {

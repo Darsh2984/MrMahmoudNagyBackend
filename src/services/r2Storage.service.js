@@ -6,42 +6,33 @@ const {
   PutObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
-  GetObjectCommand,
 } = require("@aws-sdk/client-s3");
 
 const {
-  getSignedUrl: createPresignedUrl,
+  getSignedUrl,
 } = require("@aws-sdk/s3-request-presigner");
 
-function getRequiredEnvironmentVariable(name) {
-  const value = process.env[name];
+const accountId = process.env.R2_ACCOUNT_ID;
+const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+const secretAccessKey =
+  process.env.R2_SECRET_ACCESS_KEY;
+const bucketName = process.env.R2_BUCKET_NAME;
 
-  if (!value) {
+function validateConfiguration() {
+  if (
+    !accountId ||
+    !accessKeyId ||
+    !secretAccessKey ||
+    !bucketName
+  ) {
     throw {
       status: 500,
-      msg: `${name} is not configured`,
+      msg: "Cloudflare R2 is not fully configured",
     };
   }
-
-  return value;
 }
 
-const accountId = getRequiredEnvironmentVariable(
-  "R2_ACCOUNT_ID"
-);
-
-const accessKeyId = getRequiredEnvironmentVariable(
-  "R2_ACCESS_KEY_ID"
-);
-
-const secretAccessKey =
-  getRequiredEnvironmentVariable(
-    "R2_SECRET_ACCESS_KEY"
-  );
-
-const bucketName = getRequiredEnvironmentVariable(
-  "R2_BUCKET_NAME"
-);
+validateConfiguration();
 
 const r2 = new S3Client({
   region: "auto",
@@ -55,27 +46,6 @@ const r2 = new S3Client({
     secretAccessKey,
   },
 });
-
-function normalizeFolder(folder) {
-  if (
-    typeof folder !== "string" ||
-    !folder.trim()
-  ) {
-    return "misc";
-  }
-
-  return folder
-    .trim()
-    .replace(/^\/+|\/+$/g, "")
-    .replace(/[^a-zA-Z0-9/_-]/g, "-");
-}
-
-function normalizeExtension(originalFilename) {
-  return path
-    .extname(originalFilename || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9.]/g, "");
-}
 
 async function uploadBuffer(
   buffer,
@@ -93,15 +63,13 @@ async function uploadBuffer(
     };
   }
 
-  const safeFolder =
-    normalizeFolder(folder);
-
-  const extension =
-    normalizeExtension(originalFilename);
+  const extension = path
+    .extname(originalFilename || "")
+    .toLowerCase();
 
   const objectName =
-    `${safeFolder}/${Date.now()}-` +
-    `${crypto.randomBytes(8).toString("hex")}` +
+    `${folder}/${Date.now()}-` +
+    `${crypto.randomBytes(6).toString("hex")}` +
     `${extension}`;
 
   await r2.send(
@@ -120,8 +88,7 @@ async function uploadBuffer(
       Metadata: {
         originalname:
           encodeURIComponent(
-            originalFilename ||
-              "uploaded-file"
+            originalFilename || "uploaded-file"
           ),
       },
     })
@@ -153,7 +120,7 @@ async function deleteFile(objectName) {
   }
 }
 
-async function getSignedUrl(
+async function getSignedFileUrl(
   objectName,
   expiresInMinutes = 5
 ) {
@@ -164,27 +131,18 @@ async function getSignedUrl(
     return null;
   }
 
-  const expiresInSeconds =
-    Math.max(
-      1,
-      Math.min(
-        Number(expiresInMinutes) || 5,
-        60
-      )
-    ) * 60;
+  const command =
+    new HeadObjectCommand({
+      Bucket: bucketName,
+      Key: objectName,
+    });
 
   try {
-    await r2.send(
-      new HeadObjectCommand({
-        Bucket: bucketName,
-        Key: objectName,
-      })
-    );
+    await r2.send(command);
   } catch (error) {
-    const statusCode =
-      error?.$metadata?.httpStatusCode;
-
-    if (statusCode === 404) {
+    if (
+      error?.$metadata?.httpStatusCode === 404
+    ) {
       throw {
         status: 404,
         msg: "Stored file was not found",
@@ -194,14 +152,16 @@ async function getSignedUrl(
     throw error;
   }
 
-  return createPresignedUrl(
+  return getSignedUrl(
     r2,
-    new GetObjectCommand({
+    new (require("@aws-sdk/client-s3")
+      .GetObjectCommand)({
       Bucket: bucketName,
       Key: objectName,
     }),
     {
-      expiresIn: expiresInSeconds,
+      expiresIn:
+        expiresInMinutes * 60,
     }
   );
 }
@@ -214,28 +174,12 @@ async function getFileMetadata(objectName) {
     return null;
   }
 
-  let response;
-
-  try {
-    response = await r2.send(
-      new HeadObjectCommand({
-        Bucket: bucketName,
-        Key: objectName,
-      })
-    );
-  } catch (error) {
-    const statusCode =
-      error?.$metadata?.httpStatusCode;
-
-    if (statusCode === 404) {
-      throw {
-        status: 404,
-        msg: "Stored file was not found",
-      };
-    }
-
-    throw error;
-  }
+  const response = await r2.send(
+    new HeadObjectCommand({
+      Bucket: bucketName,
+      Key: objectName,
+    })
+  );
 
   let originalName = null;
 
@@ -257,8 +201,7 @@ async function getFileMetadata(objectName) {
       "application/octet-stream",
 
     size:
-      typeof response.ContentLength ===
-      "number"
+      typeof response.ContentLength === "number"
         ? response.ContentLength
         : null,
 
@@ -269,6 +212,6 @@ async function getFileMetadata(objectName) {
 module.exports = {
   uploadBuffer,
   deleteFile,
-  getSignedUrl,
+  getSignedUrl: getSignedFileUrl,
   getFileMetadata,
 };

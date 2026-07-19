@@ -1,10 +1,13 @@
 const sessionService = require("../services/session.service");
+const { resolveTeacherId } = require("../utils/resolveTeacher");
 
 async function createSession(req, res) {
   try {
+    const teacherId = await resolveTeacherId(req.user);
+
     const session = await sessionService.createSession({
       ...req.body,
-      teacherId: req.user.id,
+      teacherId,
     });
 
     res.status(201).json({
@@ -23,7 +26,8 @@ async function createSession(req, res) {
 async function listSessionsByGroup(req, res) {
   try {
     const sessions = await sessionService.listSessionsByGroup(
-      req.params.groupId
+      req.params.groupId,
+      req.user,
     );
 
     res.json(sessions);

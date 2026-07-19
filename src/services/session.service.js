@@ -4,6 +4,78 @@ function createHttpError(status, msg) {
   return { status, msg };
 }
 
+function isAdminLevel(user) {
+  return (
+    user?.role === "TEACHER" ||
+    (
+      user?.role === "ASSISTANT" &&
+      user?.isHeadAssistant === true
+    )
+  );
+}
+
+async function assertGroupAccess(groupId, user) {
+  if (!user) {
+    throw createHttpError(401, "Unauthorized");
+  }
+
+  if (isAdminLevel(user)) {
+    return;
+  }
+
+  if (user.role === "STUDENT") {
+    const membership = await prisma.groupMembership.findUnique({
+      where: {
+        groupId_studentId: {
+          groupId,
+          studentId: user.id,
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!membership) {
+      throw createHttpError(
+        403,
+        "You do not have access to this group",
+      );
+    }
+
+    return;
+  }
+
+  if (user.role === "ASSISTANT") {
+    const assignment =
+      await prisma.assistantGroupAssignment.findUnique({
+        where: {
+          assistantId_groupId: {
+            assistantId: user.id,
+            groupId,
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    if (!assignment) {
+      throw createHttpError(
+        403,
+        "You are not assigned to this group",
+      );
+    }
+
+    return;
+  }
+
+  throw createHttpError(
+    403,
+    "You do not have access to this group",
+  );
+}
+
 function parseSessionDate(value) {
   if (!value) {
     throw createHttpError(400, "Session date is required");
@@ -126,16 +198,24 @@ async function createSession({
   });
 }
 
-async function listSessionsByGroup(groupId) {
+async function listSessionsByGroup(groupId, user) {
   if (!groupId) {
     throw createHttpError(400, "Group is required");
   }
 
+  await assertGroupAccess(groupId, user);
+
   return prisma.session.findMany({
-    where: { groupId },
+    where: {
+      groupId,
+    },
     orderBy: [
-      { date: "desc" },
-      { createdAt: "desc" },
+      {
+        date: "desc",
+      },
+      {
+        createdAt: "desc",
+      },
     ],
     include: {
       _count: {
@@ -148,9 +228,11 @@ async function listSessionsByGroup(groupId) {
   });
 }
 
-async function getSessionWithDetails(sessionId) {
+async function getSessionWithDetails(sessionId, user) {
   const session = await prisma.session.findUnique({
-    where: { id: sessionId },
+    where: {
+      id: sessionId,
+    },
     include: {
       attendance: {
         include: {
@@ -186,6 +268,24 @@ async function getSessionWithDetails(sessionId) {
 
   if (!session) {
     throw createHttpError(404, "Session not found");
+  }
+
+  await assertGroupAccess(session.groupId, user);
+
+  if (user.role === "STUDENT") {
+    session.attendance = session.attendance.filter(
+      (attendanceRecord) =>
+        attendanceRecord.studentId === user.id,
+    );
+
+    session.liveQuestions = session.liveQuestions.map(
+      (question) => ({
+        ...question,
+        answers: question.answers.filter(
+          (answer) => answer.studentId === user.id,
+        ),
+      }),
+    );
   }
 
   return session;

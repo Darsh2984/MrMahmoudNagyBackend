@@ -15,11 +15,13 @@ async function delegateSubmission(req, res) {
 
 async function gradeDelegatedSubmission(req, res) {
   try {
-    const delegation = await delegationService.gradeDelegatedSubmission({
+   const delegation =
+    await delegationService.gradeDelegatedSubmission({
       delegationId: req.params.delegationId,
       grade: req.body.grade,
       comments: req.body.comments,
       correctedFile: req.file,
+      gradedBy: req.user,
     });
     res.json({ msg: "Delegated submission graded", delegation });
   } catch (err) {

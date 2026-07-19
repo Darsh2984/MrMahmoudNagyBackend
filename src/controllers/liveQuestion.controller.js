@@ -2,13 +2,20 @@ const liveQuestionService = require("../services/liveQuestion.service");
 
 async function createLiveQuestion(req, res) {
   try {
-    const question = await liveQuestionService.createLiveQuestion(req.body);
+    const question = await liveQuestionService.createLiveQuestion({
+      sessionId: req.body.sessionId,
+      prompt: req.body.prompt,
+      gradeOutOf: req.body.gradeOutOf,
+      createdBy: req.user,
+    });
+
     res.json({ msg: "Live question created", question });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error creating live question" });
+    res
+      .status(err.status || 500)
+      .json({ msg: err.msg || "Error creating live question" });
   }
 }
-
 async function submitAnswer(req, res) {
   try {
     const answer = await liveQuestionService.submitAnswer({
@@ -26,21 +33,30 @@ async function gradeAnswer(req, res) {
   try {
     const answer = await liveQuestionService.gradeAnswer({
       answerId: req.params.answerId,
-      gradedById: req.user.id,
+      gradedBy: req.user,
       grade: req.body.grade,
     });
+
     res.json({ msg: "Answer graded", answer });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error grading answer" });
+    res
+      .status(err.status || 500)
+      .json({ msg: err.msg || "Error grading answer" });
   }
 }
 
 async function listAnswers(req, res) {
   try {
-    const answers = await liveQuestionService.listAnswersForQuestion(req.params.liveQuestionId);
+    const answers = await liveQuestionService.listAnswersForQuestion(
+      req.params.liveQuestionId,
+      req.user
+    );
+
     res.json(answers);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error listing answers" });
+    res
+      .status(err.status || 500)
+      .json({ msg: err.msg || "Error listing answers" });
   }
 }
 

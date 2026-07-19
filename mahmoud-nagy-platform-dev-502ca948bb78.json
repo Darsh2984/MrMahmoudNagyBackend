@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "mahmoud-nagy-platform-dev",
+  "private_key_id": "502ca948bb78039ddfa1eec03437dff0ae2d4d0c",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRguluUcMvsV6n\n/FN6Jf6W2HlfyO3Pa15Ur691SuPOwMxBacqXh4Cw5yeTk/nXHstYpxYrqYZOfZ3G\n7/iV4QFG/iAyou5bM6tJ7qJvq9HMkttT4PoBZ9x72i3nF/Nc3N9898Unb60Dvubo\nk2D+34FlCqAcMBc8faRNVRrTED7pw2IUqY359p1E5o1UyTEkDSHvAy1HhnxgKhGu\nlhrJrNJW7YrZB4q1/3i7+WGA9PGurEQhNwHox/sHDvi7COzICMbFFvIiT8rpQv5o\nt/X3bq9D/v06UWav99YaAGtjE3AP0b0p7+/yBfHHOUiik2rFRXe+XbJk1xmbE8uZ\n2rIdpsZ5AgMBAAECggEACtwTR3GbgWxbMK/mj81KXf1IhUt/8CFrmU4l9Rl1p3Dc\n5YMbSjFu3TyOE5s29wyUk7rNbmPyHz1poTctFm+8RjbD6nwBiN6rwUBKUSmBzW3L\nSpS9wLbmedD8Uh8usSCNwQeCw6GJQUly5JlHDM7/AQLE+9EOU0db7do8crZD3I/5\nDUhYrdys9/CHWS49xn5I3/O+Tj3rKZOmimAvWEUXPM17/dCr8xn482OkbR9VK5ST\na6Vbdu1vNdHzBLe2ZSrA1gVanJFCoAvhtatYZYcZHe5i18xDhP1dXzxQ3jCWjbje\nRwcLyINcjHV0i+D3exsEyRrgF/gdPRHRgEL3flW9RQKBgQDxHa/1ax2iL5CZSZUJ\nOQvOS4EkDt54Hhn7ysz4kxWl7UMtpmctUFx6PyxuwdhdAeQWxPC54z5aWSZCoi04\nYTwqRVk7pAJTBJHCwQGgjw7YWWd4I2uAd5r0Lw1EghHRERCATrU9U1BqqSWCRfpL\nMalzAPDy4l4agD5zn8m/miX2lwKBgQDecchjab5Q32patPJekw4I8ED6+rFn/4iU\nCp35G4DUGSA+WkqfR3+SF3iiNCoy8FL9yos6XCJy10Udl6KSpiqV9aqGCtwciHzz\nflXKras6Frcc7V3GLD0NlOlY4VlI6PGeiBUIHLN9CF+DCh1t8jmHyGCs6EToGyFq\nNUOu98RdbwKBgEv6+vPvaUsuifaEBX7+hwXfLTbbqKdZdP6vjZ/XWb8L4VuFUIYr\nCLlNJwdP9op4ihPSw7kQLxnxdekRigZ2PatkZxYwPLtEeVpRz910t0zd/4kQQFQf\nXKkOGrQ3+L1VD0ofg2Vr16+E1dkTjCgd4jPnXAZt5xGa0BNHix/hx4zJAoGBAJCO\n5Skl6RZpepZkDTZE3tQUPkZccLojKED8/ViL9RbhFUEwMFp+fnsUYcMXn2znHSft\nXrmYcpKrLzFh/7bJ4db+hckCebTZRkp/CYXjgukHJgzYfR5yVWLkKRknqXxmVc8u\npGxXKpXQwTFJe4Kd7aE+KQV1FIK6TubUop2sSqJlAoGAXSTkPI4sZLta4Dq6T77b\nposqQLywd5A8QgcS1qDmlR2ZC2FdS2kFzlhWKOQKxOYrhe4WtQi5/9QAQ32uXOBc\nZHitg95vHIvU1Jchh7OBhf4OEWCwkMnvN6uK+FbbjJkCjND+op4oKzaUzjMfqHN8\nVT2khwUBPCSzHHkv4efmBjs=\n-----END PRIVATE KEY-----\n",
+  "client_email": "mahmoud-nagy-backend-dev@mahmoud-nagy-platform-dev.iam.gserviceaccount.com",
+  "client_id": "101965762154734591252",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/mahmoud-nagy-backend-dev%40mahmoud-nagy-platform-dev.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

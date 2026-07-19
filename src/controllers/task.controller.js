@@ -203,10 +203,10 @@ async function updateTask(req, res) {
 
 async function listTasksForGroup(req, res) {
   try {
-    const tasks =
-      await taskService.listTasksForGroup(
-        req.params.groupId,
-      );
+    const tasks = await taskService.listTasksForGroup(
+      req.params.groupId,
+      req.user,
+    );
 
     return res.json(tasks);
   } catch (err) {
@@ -223,10 +223,10 @@ async function listTasksForGroup(req, res) {
 
 async function getTask(req, res) {
   try {
-    const task =
-      await taskService.getTaskWithSubmissions(
-        req.params.taskId,
-      );
+    const task = await taskService.getTaskWithSubmissions(
+      req.params.taskId,
+      req.user,
+    );
 
     return res.json(task);
   } catch (err) {
