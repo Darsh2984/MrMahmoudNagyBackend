@@ -61,6 +61,13 @@ router.post(
 );
 
 router.get(
+  "/:quizId/review",
+  requireRole("STUDENT"),
+  quizStudentController
+    .getMyQuizReview,
+);
+
+router.get(
   "/:quizId/take",
   requireRole("STUDENT"),
   quizStudentController.getQuizForTaking,

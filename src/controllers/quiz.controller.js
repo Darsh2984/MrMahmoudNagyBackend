@@ -1,11 +1,15 @@
 const quizService = require(
-  "../services/quiz.service"
+  "../services/quiz.service",
+);
+
+const quizGradingService = require(
+  "../services/quizGrading.service",
 );
 
 const {
   resolveTeacherId,
 } = require(
-  "../utils/resolveTeacher"
+  "../utils/resolveTeacher",
 );
 
 function parseArray(value, fieldName) {
@@ -28,7 +32,7 @@ function parseArray(value, fieldName) {
       return parsed;
     } catch {
       const error = new Error(
-        `${fieldName} must be a valid array`
+        `${fieldName} must be a valid array`,
       );
 
       error.status = 400;
@@ -40,7 +44,7 @@ function parseArray(value, fieldName) {
   }
 
   const error = new Error(
-    `${fieldName} must be an array`
+    `${fieldName} must be an array`,
   );
 
   error.status = 400;
@@ -50,7 +54,11 @@ function parseArray(value, fieldName) {
   throw error;
 }
 
-function sendError(res, error, fallback) {
+function sendError(
+  res,
+  error,
+  fallback,
+) {
   console.error(fallback, error);
 
   return res
@@ -60,66 +68,94 @@ function sendError(res, error, fallback) {
         error.msg ||
         error.message ||
         fallback,
+
+      ...(error.data !== undefined
+        ? {
+            data: error.data,
+          }
+        : {}),
     });
 }
 
 async function createQuiz(req, res) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.createQuiz({
         teacherId,
+
         title: req.body.title,
+
         description:
           req.body.description,
+
         type: req.body.type,
+
         durationMinutes:
           req.body.durationMinutes,
+
         startAt: req.body.startAt,
+
         endAt: req.body.endAt,
 
         groupIds:
           parseArray(
             req.body.groupIds,
-            "groupIds"
+            "groupIds",
           ) || [],
 
         questions:
           parseArray(
             req.body.questions,
-            "questions"
+            "questions",
           ) || [],
       });
 
-    return res.status(201).json({
-      msg: "Quiz created",
-      quiz,
-    });
+    return res
+      .status(201)
+      .json({
+        msg: "Quiz created",
+        quiz,
+      });
   } catch (error) {
     return sendError(
       res,
       error,
-      "Error creating quiz"
+      "Error creating quiz",
     );
   }
 }
 
-async function listQuizzes(req, res) {
+async function listQuizzes(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quizzes =
       await quizService.listQuizzes(
         teacherId,
         {
-          status: req.query.status,
-          type: req.query.type,
-          groupId: req.query.groupId,
-          search: req.query.search,
-        }
+          status:
+            req.query.status,
+
+          type:
+            req.query.type,
+
+          groupId:
+            req.query.groupId,
+
+          search:
+            req.query.search,
+        },
       );
 
     return res.json(quizzes);
@@ -127,7 +163,7 @@ async function listQuizzes(req, res) {
     return sendError(
       res,
       error,
-      "Error listing quizzes"
+      "Error listing quizzes",
     );
   }
 }
@@ -135,12 +171,14 @@ async function listQuizzes(req, res) {
 async function getQuiz(req, res) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.getQuiz(
         req.params.quizId,
-        teacherId
+        teacherId,
       );
 
     return res.json(quiz);
@@ -148,44 +186,57 @@ async function getQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error fetching quiz"
+      "Error fetching quiz",
     );
   }
 }
 
-async function updateQuiz(req, res) {
+async function updateQuiz(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.updateQuiz(
         req.params.quizId,
         teacherId,
         {
-          title: req.body.title,
+          title:
+            req.body.title,
+
           description:
             req.body.description,
-          type: req.body.type,
+
+          type:
+            req.body.type,
 
           durationMinutes:
-            req.body.durationMinutes,
+            req.body
+              .durationMinutes,
 
-          startAt: req.body.startAt,
-          endAt: req.body.endAt,
+          startAt:
+            req.body.startAt,
+
+          endAt:
+            req.body.endAt,
 
           groupIds:
             parseArray(
               req.body.groupIds,
-              "groupIds"
+              "groupIds",
             ),
 
           questions:
             parseArray(
               req.body.questions,
-              "questions"
+              "questions",
             ),
-        }
+        },
       );
 
     return res.json({
@@ -196,20 +247,25 @@ async function updateQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error updating quiz"
+      "Error updating quiz",
     );
   }
 }
 
-async function publishQuiz(req, res) {
+async function publishQuiz(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.publishQuiz(
         req.params.quizId,
-        teacherId
+        teacherId,
       );
 
     return res.json({
@@ -220,20 +276,25 @@ async function publishQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error publishing quiz"
+      "Error publishing quiz",
     );
   }
 }
 
-async function closeQuiz(req, res) {
+async function closeQuiz(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.closeQuiz(
         req.params.quizId,
-        teacherId
+        teacherId,
       );
 
     return res.json({
@@ -244,20 +305,25 @@ async function closeQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error closing quiz"
+      "Error closing quiz",
     );
   }
 }
 
-async function reopenQuiz(req, res) {
+async function reopenQuiz(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     const quiz =
       await quizService.reopenQuiz(
         req.params.quizId,
-        teacherId
+        teacherId,
       );
 
     return res.json({
@@ -268,19 +334,24 @@ async function reopenQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error reopening quiz"
+      "Error reopening quiz",
     );
   }
 }
 
-async function deleteQuiz(req, res) {
+async function deleteQuiz(
+  req,
+  res,
+) {
   try {
     const teacherId =
-      await resolveTeacherId(req.user);
+      await resolveTeacherId(
+        req.user,
+      );
 
     await quizService.deleteQuiz(
       req.params.quizId,
-      teacherId
+      teacherId,
     );
 
     return res.json({
@@ -290,7 +361,160 @@ async function deleteQuiz(req, res) {
     return sendError(
       res,
       error,
-      "Error deleting quiz"
+      "Error deleting quiz",
+    );
+  }
+}
+
+async function listQuizSubmissions(
+  req,
+  res,
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user,
+      );
+
+    const result =
+      await quizGradingService
+        .listQuizSubmissions({
+          quizId:
+            req.params.quizId,
+
+          teacherId,
+        });
+
+    return res.json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error listing quiz submissions",
+    );
+  }
+}
+
+async function getQuizSubmissionDetail(
+  req,
+  res,
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user,
+      );
+
+    const result =
+      await quizGradingService
+        .getQuizSubmissionDetail({
+          quizId:
+            req.params.quizId,
+
+          submissionId:
+            req.params
+              .submissionId,
+
+          teacherId,
+        });
+
+    return res.json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error fetching quiz submission",
+    );
+  }
+}
+
+async function gradePaperSubmission(
+  req,
+  res,
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user,
+      );
+
+    const result =
+      await quizGradingService
+        .gradePaperSubmission({
+          quizId:
+            req.params.quizId,
+
+          submissionId:
+            req.params
+              .submissionId,
+
+          teacherId,
+
+          graderId:
+            req.user.id,
+
+          grade:
+            req.body.grade,
+
+          comments:
+            req.body.comments,
+
+          files:
+            req.files || [],
+        });
+
+    return res.json({
+      msg:
+        "Paper quiz graded successfully.",
+
+      submission: result,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error grading Paper quiz",
+    );
+  }
+}
+
+async function deleteCorrectedPaperFile(
+  req,
+  res,
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user,
+      );
+
+    const result =
+      await quizGradingService
+        .deleteCorrectedPaperFile({
+          quizId:
+            req.params.quizId,
+
+          submissionId:
+            req.params
+              .submissionId,
+
+          fileId:
+            req.params.fileId,
+
+          teacherId,
+        });
+
+    return res.json({
+      msg:
+        "Corrected Paper quiz file deleted.",
+
+      fileId: result.id,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error deleting corrected Paper quiz file",
     );
   }
 }
@@ -304,4 +528,9 @@ module.exports = {
   closeQuiz,
   reopenQuiz,
   deleteQuiz,
+
+  listQuizSubmissions,
+  getQuizSubmissionDetail,
+  gradePaperSubmission,
+  deleteCorrectedPaperFile,
 };

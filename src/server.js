@@ -7,6 +7,11 @@ const prisma = require("./config/prisma");
 const {
   assertTicketAccess,
 } = require("./services/ticket.service");
+const {
+  assertGroupChatAccess,
+} = require(
+  "./services/groupChatAccess.service",
+);
 const { Server } = require("socket.io");
 
 dotenv.config();
@@ -39,6 +44,7 @@ const videoCheckpointRoutes = require("./routes/videoCheckpoint.routes");
 const adminRoutes = require("./routes/admin.routes");
 const performanceRoutes = require("./routes/performance.routes");
 const dashboardSummaryRoutes = require("./routes/dashboardSummary.routes");
+const groupChatRoutes = require("./routes/groupChat.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -76,7 +82,7 @@ app.use("/api/videocheckpoint", videoCheckpointRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/performance", performanceRoutes);
 app.use("/api/dashboard", dashboardSummaryRoutes);
-
+app.use("/api/group-chat",groupChatRoutes,);
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 
 io.use(async (socket, next) => {
@@ -128,6 +134,24 @@ io.use(async (socket, next) => {
     next(new Error("Invalid authentication token"));
   }
 });
+
+
+function getGroupChatRoom(groupId) {
+  return `group-chat:${String(groupId)}`;
+}
+
+function getGroupIdFromChatRoom(room) {
+  const prefix = "group-chat:";
+
+  if (
+    typeof room !== "string" ||
+    !room.startsWith(prefix)
+  ) {
+    return null;
+  }
+
+  return room.slice(prefix.length);
+}
 
 io.on("connection", (socket) => {
   console.log(
@@ -184,6 +208,152 @@ io.on("connection", (socket) => {
         });
       }
     }
+  );
+    socket.on(
+    "join-group-chat",
+    async ({ groupId }, callback) => {
+      try {
+        if (!groupId) {
+          throw {
+            status: 400,
+            msg: "Group ID is required.",
+          };
+        }
+
+        const group =
+          await assertGroupChatAccess(
+            String(groupId),
+            socket.user,
+          );
+
+        const room =
+          getGroupChatRoom(group.id);
+
+        socket.join(room);
+
+        callback?.({
+          ok: true,
+
+          group: {
+            id: group.id,
+            name: group.name,
+            yearId: group.yearId,
+          },
+        });
+      } catch (error) {
+        callback?.({
+          ok: false,
+
+          msg:
+            error.msg ||
+            error.message ||
+            "Unable to join group chat.",
+        });
+      }
+    },
+  );
+
+  socket.on(
+    "group-chat-typing-start",
+    ({ groupId }) => {
+      if (!groupId) {
+        return;
+      }
+
+      const normalizedGroupId =
+        String(groupId);
+
+      const room =
+        getGroupChatRoom(
+          normalizedGroupId,
+        );
+
+      if (!socket.rooms.has(room)) {
+        return;
+      }
+
+      socket
+        .to(room)
+        .emit(
+          "group-chat-user-typing",
+          {
+            groupId:
+              normalizedGroupId,
+
+            user: socket.user,
+
+            isTyping: true,
+          },
+        );
+    },
+  );
+
+  socket.on(
+    "group-chat-typing-stop",
+    ({ groupId }) => {
+      if (!groupId) {
+        return;
+      }
+
+      const normalizedGroupId =
+        String(groupId);
+
+      const room =
+        getGroupChatRoom(
+          normalizedGroupId,
+        );
+
+      if (!socket.rooms.has(room)) {
+        return;
+      }
+
+      socket
+        .to(room)
+        .emit(
+          "group-chat-user-typing",
+          {
+            groupId:
+              normalizedGroupId,
+
+            user: socket.user,
+
+            isTyping: false,
+          },
+        );
+    },
+  );
+
+  socket.on(
+    "leave-group-chat",
+    ({ groupId }) => {
+      if (!groupId) {
+        return;
+      }
+
+      const normalizedGroupId =
+        String(groupId);
+
+      const room =
+        getGroupChatRoom(
+          normalizedGroupId,
+        );
+
+      socket
+        .to(room)
+        .emit(
+          "group-chat-user-typing",
+          {
+            groupId:
+              normalizedGroupId,
+
+            user: socket.user,
+
+            isTyping: false,
+          },
+        );
+
+      socket.leave(room);
+    },
   );
 
   socket.on(
@@ -245,19 +415,50 @@ io.on("connection", (socket) => {
     }
   );
 
-  socket.on("disconnecting", () => {
+    socket.on("disconnecting", () => {
     for (const room of socket.rooms) {
       if (room === socket.id) {
         continue;
       }
 
+      const groupId =
+        getGroupIdFromChatRoom(
+          room,
+        );
+
+      if (groupId) {
+        socket
+          .to(room)
+          .emit(
+            "group-chat-user-typing",
+            {
+              groupId,
+
+              user: socket.user,
+
+              isTyping: false,
+            },
+          );
+
+        continue;
+      }
+
+      /*
+       * Existing ticket rooms use the
+       * ticket ID directly.
+       */
       socket
         .to(room)
-        .emit("ticket-user-typing", {
-          ticketId: room,
-          user: socket.user,
-          isTyping: false,
-        });
+        .emit(
+          "ticket-user-typing",
+          {
+            ticketId: room,
+
+            user: socket.user,
+
+            isTyping: false,
+          },
+        );
     }
   });
 

@@ -56,19 +56,40 @@ async function lookupByAccessCode(req, res) {
 
 async function forgotPassword(req, res) {
   try {
-    const result = await authService.forgotPassword(req.body.email);
-    res.json(result);
+    const result =
+      await authService.forgotPassword(
+        req.body?.email,
+      );
+
+    return res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error sending reset email" });
+    return res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error sending reset email",
+      });
   }
 }
 
 async function resetPassword(req, res) {
   try {
-    const result = await authService.resetPassword(req.params.token, req.body.password);
-    res.json(result);
+    const result =
+      await authService.resetPassword(
+        req.params.token,
+        req.body?.password,
+      );
+
+    return res.json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error resetting password" });
+    return res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error resetting password",
+      });
   }
 }
 

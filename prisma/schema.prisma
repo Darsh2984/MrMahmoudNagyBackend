@@ -149,12 +149,14 @@ model User {
   ticketCategoriesCreated TicketCategory[]     @relation("TicketCategoryCreatedBy")
 
   // Relations (as assistant)
-  groupAssignments    AssistantGroupAssignment[]
-  delegationsReceived Delegation[]               @relation("AssistantDelegations")
-  delegationsAssigned Delegation[]               @relation("DelegatedBy")
-  gradedLiveAnswers   LiveQuestionAnswer[]       @relation("GradedBy")
-  ticketsAssigned     Ticket[]                   @relation("TicketAssignedTo")
-  ticketMessagesSent  TicketMessage[]
+  groupAssignments      AssistantGroupAssignment[]
+  delegationsReceived   Delegation[]               @relation("AssistantDelegations")
+  delegationsAssigned   Delegation[]               @relation("DelegatedBy")
+  gradedLiveAnswers     LiveQuestionAnswer[]       @relation("GradedBy")
+  ticketsAssigned       Ticket[]                   @relation("TicketAssignedTo")
+  ticketMessagesSent    TicketMessage[]
+  groupChatMessagesSent GroupChatMessage[]
+  groupChatReadStates   GroupChatReadState[]
 
   paperQuizSubmissionsGraded QuizSubmission[] @relation("PaperQuizGradedBy")
 
@@ -163,7 +165,8 @@ model User {
 
   homeworkFilesUploaded SubmissionFile[] @relation("SubmissionFileUploadedBy")
 
-  correctedHomeworkFilesUploaded CorrectedSubmissionFile[] @relation("CorrectedSubmissionFileUploadedBy")
+  correctedHomeworkFilesUploaded  CorrectedSubmissionFile[] @relation("CorrectedSubmissionFileUploadedBy")
+  correctedPaperQuizFilesUploaded CorrectedPaperQuizFile[]  @relation("CorrectedPaperQuizUploadedBy")
 
   homeworkSubmissionsGraded Submission[] @relation("HomeworkGradedBy")
 
@@ -210,6 +213,8 @@ model Group {
   sessions             Session[]
   tasks                TaskGroup[]
   quizzes              QuizGroup[]
+  chatMessages         GroupChatMessage[]
+  chatReadStates       GroupChatReadState[]
 }
 
 model GroupMembership {
@@ -231,6 +236,47 @@ model AssistantGroupAssignment {
   group       Group  @relation(fields: [groupId], references: [id])
 
   @@unique([assistantId, groupId])
+}
+
+model GroupChatMessage {
+  id String @id @default(uuid())
+
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  senderId String
+  sender   User   @relation(fields: [senderId], references: [id])
+
+  messageType TicketMessageType @default(TEXT)
+
+  content String?
+
+  attachmentUrl      String?
+  attachmentName     String?
+  attachmentMimeType String?
+  attachmentSize     Int?
+  audioDuration      Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([groupId, createdAt])
+  @@index([senderId])
+}
+
+model GroupChatReadState {
+  id String @id @default(uuid())
+
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastReadAt DateTime @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId, lastReadAt])
 }
 
 model Unit {
@@ -501,7 +547,8 @@ model QuizSubmission {
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  paperFiles PaperQuizSubmissionFile[]
+  paperFiles          PaperQuizSubmissionFile[]
+  correctedPaperFiles CorrectedPaperQuizFile[]
 
   @@unique([quizId, studentId])
   @@index([quizId])
@@ -529,6 +576,31 @@ model PaperQuizSubmissionFile {
   uploadedAt DateTime @default(now())
 
   @@index([submissionId, order])
+}
+
+model CorrectedPaperQuizFile {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   QuizSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  // Private Cloudflare R2 object key.
+  objectKey String
+
+  originalName String
+  contentType  String
+  size         Int?
+
+  // Preserves the grader's upload order.
+  order Int @default(0)
+
+  uploadedById String
+  uploadedBy   User   @relation("CorrectedPaperQuizUploadedBy", fields: [uploadedById], references: [id])
+
+  uploadedAt DateTime @default(now())
+
+  @@index([submissionId, order])
+  @@index([uploadedById])
 }
 
 // In-class quick quizzes (teacher-graded groups of students, not question-bank based)

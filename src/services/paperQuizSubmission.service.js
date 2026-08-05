@@ -25,6 +25,43 @@ function createServiceError(
   return error;
 }
 
+function getAttemptExpiry({
+  startedAt,
+  durationMinutes,
+  quizEndAt,
+}) {
+  const duration =
+    Number(durationMinutes);
+
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 0
+  ) {
+    throw createServiceError(
+      500,
+      "The Paper quiz has an invalid duration.",
+    );
+  }
+
+  const durationExpiry =
+    new Date(
+      startedAt.getTime() +
+        duration * 60 * 1000,
+    );
+
+  if (!quizEndAt) {
+    return durationExpiry;
+  }
+
+  const scheduledEnd =
+    new Date(quizEndAt);
+
+  return durationExpiry <
+    scheduledEnd
+    ? durationExpiry
+    : scheduledEnd;
+}
+
 function getQuizAvailability(
   quiz,
   now = new Date(),
@@ -210,28 +247,52 @@ async function getOrCreateSubmission({
       403,
       availability.message,
       {
-        state: availability.code,
-        startAt: quiz.startAt,
-        endAt: quiz.endAt,
+        state:
+          availability.code,
+
+        startAt:
+          quiz.startAt,
+
+        endAt:
+          quiz.endAt,
       },
     );
   }
 
+  const startedAt =
+    new Date();
+
+  const expiresAt =
+    getAttemptExpiry({
+      startedAt,
+
+      durationMinutes:
+        quiz.durationMinutes,
+
+      quizEndAt:
+        quiz.endAt,
+    });
+
   submission =
     await prisma.quizSubmission.create({
       data: {
-        quizId: quiz.id,
+        quizId:
+          quiz.id,
+
         studentId,
+
         answers: [],
+
         score: 0,
 
-        startedAt: new Date(),
+        startedAt,
 
-        expiresAt:
-          quiz.endAt || null,
+        expiresAt,
 
         isSubmitted: false,
+
         isAutoSubmitted: false,
+
         isGraded: false,
       },
 

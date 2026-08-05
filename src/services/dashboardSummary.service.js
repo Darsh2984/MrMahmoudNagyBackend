@@ -1,52 +1,132 @@
 const prisma = require("../config/prisma");
 
-async function getTeacherDashboardSummary(teacherId) {
-  const years = await prisma.year.findMany({
-    where: { teacherId },
-    include: { groups: { include: { members: true } } },
-  });
+async function getTeacherDashboardSummary(
+  teacherId,
+) {
+  const years =
+    await prisma.year.findMany({
+      where: {
+        teacherId,
+      },
+
+      include: {
+        groups: {
+          include: {
+            members: true,
+          },
+        },
+      },
+    });
 
   const totalYears = years.length;
-  const allGroups = years.flatMap((y) => y.groups);
-  const totalGroups = allGroups.length;
-  const uniqueStudentIds = new Set(allGroups.flatMap((g) => g.members.map((m) => m.studentId)));
-  const totalStudents = uniqueStudentIds.size;
 
-  const unresolvedTickets = await prisma.ticket.count({
-    where: { status: { in: ["OPEN", "REOPENED"] } },
-  });
+  const allGroups = years.flatMap(
+    (year) => year.groups,
+  );
 
-  // Ungraded written quiz answers — counted in JS since answers live in a JSON column.
-  const quizzes = await prisma.quiz.findMany({ where: { teacherId }, select: { id: true } });
-  const quizIds = quizzes.map((q) => q.id);
-  const submissions = await prisma.quizSubmission.findMany({
-    where: { quizId: { in: quizIds }, isSubmitted: true },
-    select: { answers: true },
-  });
-  let ungradedWritten = 0;
-  for (const sub of submissions) {
-    const answers = Array.isArray(sub.answers) ? sub.answers : [];
-    ungradedWritten += answers.filter((a) => a.isCorrect === null || a.isCorrect === undefined).length;
-  }
+  const totalGroups =
+    allGroups.length;
 
-  const undelegatedSubmissions = await prisma.submission.count({
-    where: { task: { teacherId }, delegation: { is: null }, grade: null },
-  });
+  const uniqueStudentIds =
+    new Set(
+      allGroups.flatMap((group) =>
+        group.members.map(
+          (membership) =>
+            membership.studentId,
+        ),
+      ),
+    );
+
+  const totalStudents =
+    uniqueStudentIds.size;
+
+  const unresolvedTickets =
+    await prisma.ticket.count({
+      where: {
+        status: {
+          in: [
+            "OPEN",
+            "REOPENED",
+          ],
+        },
+      },
+    });
+
+  /*
+   * Pending written grading
+   *
+   * Count complete PAPER quiz submissions
+   * that have not yet been manually graded.
+   *
+   * This deliberately excludes:
+   * - MCQ quizzes
+   * - PAPER attempts not yet submitted
+   * - PAPER submissions already graded
+   */
+  const ungradedWritten =
+    await prisma.quizSubmission.count({
+      where: {
+        quiz: {
+          teacherId,
+          type: "PAPER",
+        },
+
+        isSubmitted: true,
+        isGraded: false,
+      },
+    });
+
+  const undelegatedSubmissions =
+    await prisma.submission.count({
+      where: {
+        task: {
+          teacherId,
+        },
+
+        delegation: {
+          is: null,
+        },
+
+        grade: null,
+      },
+    });
 
   return {
     totalYears,
     totalGroups,
     totalStudents,
     unresolvedTickets,
+
+    /*
+     * Keep this response property for
+     * frontend compatibility.
+     *
+     * It now represents the number of
+     * submitted PAPER exams awaiting
+     * manual grading.
+     */
     ungradedWritten,
+
     undelegatedSubmissions,
-    years: years.map((y) => ({
-      id: y.id,
-      name: y.name,
-      groupCount: y.groups.length,
-      studentCount: y.groups.reduce((sum, g) => sum + g.members.length, 0),
+
+    years: years.map((year) => ({
+      id: year.id,
+      name: year.name,
+
+      groupCount:
+        year.groups.length,
+
+      studentCount:
+        year.groups.reduce(
+          (total, group) =>
+            total +
+            group.members.length,
+          0,
+        ),
     })),
   };
 }
 
-module.exports = { getTeacherDashboardSummary };
+module.exports = {
+  getTeacherDashboardSummary,
+};

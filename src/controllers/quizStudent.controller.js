@@ -7,7 +7,13 @@ const paperQuizService =
 const paperQuizSubmissionService =
   require("../services/paperQuizSubmission.service");
 
-function sendError(
+
+const quizStudentReviewService =
+  require(
+    "../services/quizStudentReview.service",
+  );
+
+  function sendError(
   res,
   error,
   fallbackMessage,
@@ -278,6 +284,31 @@ async function listSubmissionsForQuiz(
   }
 }
 
+async function getMyQuizReview(
+  req,
+  res,
+) {
+  try {
+    const result =
+      await quizStudentReviewService
+        .getStudentQuizReview({
+          quizId:
+            req.params.quizId,
+
+          studentId:
+            req.user.id,
+        });
+
+    return res.json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error fetching quiz review.",
+    );
+  }
+}
+
 module.exports = {
   listMyQuizzes,
   startQuiz,
@@ -285,7 +316,7 @@ module.exports = {
   answerQuestion,
   submitQuiz,
   getMySubmission,
-
+  getMyQuizReview,
   getPaperQuiz,
   getPaperQuizStatus,
   uploadPaperFiles,
