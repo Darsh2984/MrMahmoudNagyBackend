@@ -1,46 +1,271 @@
 const prisma = require("../config/prisma");
 
-async function createUnit({ name, yearId, teacherId }) {
-  const year = await prisma.year.findUnique({ where: { id: yearId } });
-  if (!year) throw { status: 404, msg: "Year not found" };
-
-  return prisma.unit.create({ data: { name, yearId, teacherId } });
+function normalizeName(name) {
+  return typeof name === "string"
+    ? name.trim()
+    : "";
 }
 
-async function listUnitsByYear(yearId) {
-  return prisma.unit.findMany({
-    where: { yearId },
-    orderBy: { createdAt: "asc" },
-    include: { _count: { select: { chapters: true } } },
-  });
-}
+async function createUnit({
+  name,
+  teacherId,
+}) {
+  const normalizedName =
+    normalizeName(name);
 
-async function getUnitWithChapters(unitId) {
-  const unit = await prisma.unit.findUnique({
-    where: { id: unitId },
+  if (!normalizedName) {
+    throw {
+      status: 400,
+      msg: "Unit name is required",
+    };
+  }
+
+  if (!teacherId) {
+    throw {
+      status: 401,
+      msg: "Unauthorized",
+    };
+  }
+
+  const existing =
+    await prisma.unit.findFirst({
+      where: {
+        name: {
+          equals: normalizedName,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (existing) {
+    throw {
+      status: 400,
+      msg: "A unit with this name already exists",
+    };
+  }
+
+  return prisma.unit.create({
+    data: {
+      name: normalizedName,
+      teacherId,
+    },
     include: {
-      chapters: { orderBy: { createdAt: "asc" }, include: { _count: { select: { topics: true } } } },
-      materials: true, // resources uploaded directly at unit level (rare, per spec)
-      videos: true,
+      _count: {
+        select: {
+          chapters: true,
+        },
+      },
     },
   });
-  if (!unit) throw { status: 404, msg: "Unit not found" };
+}
+
+async function listUnits() {
+  return prisma.unit.findMany({
+    orderBy: [
+      {
+        name: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+    include: {
+      _count: {
+        select: {
+          chapters: true,
+          materials: true,
+          videos: true,
+        },
+      },
+    },
+  });
+}
+
+async function getUnitWithChapters(
+  unitId
+) {
+  const unit =
+    await prisma.unit.findUnique({
+      where: {
+        id: unitId,
+      },
+      include: {
+        chapters: {
+          orderBy: {
+            createdAt: "asc",
+          },
+          include: {
+            _count: {
+              select: {
+                topics: true,
+                materials: true,
+                videos: true,
+              },
+            },
+          },
+        },
+        materials: {
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+        videos: {
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
+    });
+
+  if (!unit) {
+    throw {
+      status: 404,
+      msg: "Unit not found",
+    };
+  }
+
   return unit;
 }
 
-async function updateUnit(unitId, { name }) {
-  return prisma.unit.update({ where: { id: unitId }, data: { name } });
+async function updateUnit(
+  unitId,
+  { name }
+) {
+  const normalizedName =
+    normalizeName(name);
+
+  if (!normalizedName) {
+    throw {
+      status: 400,
+      msg: "Unit name is required",
+    };
+  }
+
+  const unit =
+    await prisma.unit.findUnique({
+      where: {
+        id: unitId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!unit) {
+    throw {
+      status: 404,
+      msg: "Unit not found",
+    };
+  }
+
+  const duplicate =
+    await prisma.unit.findFirst({
+      where: {
+        id: {
+          not: unitId,
+        },
+        name: {
+          equals: normalizedName,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (duplicate) {
+    throw {
+      status: 400,
+      msg: "A unit with this name already exists",
+    };
+  }
+
+  return prisma.unit.update({
+    where: {
+      id: unitId,
+    },
+    data: {
+      name: normalizedName,
+    },
+    include: {
+      _count: {
+        select: {
+          chapters: true,
+        },
+      },
+    },
+  });
 }
 
 async function deleteUnit(unitId) {
-  // Cascade behavior intentionally NOT automatic — chapters/topics/resources under
-  // a unit are real academic content. Require the caller to confirm cascade explicitly
-  // at the route/UI level before we ever wire up a hard delete here.
-  const chapterCount = await prisma.chapter.count({ where: { unitId } });
-  if (chapterCount > 0) {
-    throw { status: 400, msg: "Cannot delete a unit that still has chapters — remove chapters first" };
+  const unit =
+    await prisma.unit.findUnique({
+      where: {
+        id: unitId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!unit) {
+    throw {
+      status: 404,
+      msg: "Unit not found",
+    };
   }
-  return prisma.unit.delete({ where: { id: unitId } });
+
+  const [
+    chapterCount,
+    materialCount,
+    videoCount,
+  ] = await Promise.all([
+    prisma.chapter.count({
+      where: {
+        unitId,
+      },
+    }),
+
+    prisma.material.count({
+      where: {
+        unitId,
+      },
+    }),
+
+    prisma.video.count({
+      where: {
+        unitId,
+      },
+    }),
+  ]);
+
+  if (
+    chapterCount > 0 ||
+    materialCount > 0 ||
+    videoCount > 0
+  ) {
+    throw {
+      status: 400,
+      msg:
+        "Cannot delete a unit that still contains chapters, materials, or videos",
+    };
+  }
+
+  return prisma.unit.delete({
+    where: {
+      id: unitId,
+    },
+  });
 }
 
-module.exports = { createUnit, listUnitsByYear, getUnitWithChapters, updateUnit, deleteUnit };
+module.exports = {
+  createUnit,
+  listUnits,
+  getUnitWithChapters,
+  updateUnit,
+  deleteUnit,
+};

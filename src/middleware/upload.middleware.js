@@ -20,16 +20,38 @@ const materialUpload = multer({
 // WRITTEN-type questions only — MCQs just have a correctAnswer, no markscheme file).
 const questionUpload = multer({
   storage: memoryStorage,
-  limits: { fileSize: 20 * 1024 * 1024 },
+
+  limits: {
+    fileSize: 20 * 1024 * 1024,
+  },
+
   fileFilter: (req, file, cb) => {
-    if (file.mimetype !== "application/pdf") {
-      return cb({ status: 400, msg: "Questions and markschemes must be uploaded as PDF" });
+    const allowedMimeTypes = [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+      "image/jpg",
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return cb({
+        status: 400,
+        msg:
+          "Questions and markschemes must be PDF, JPG, JPEG, or PNG files",
+      });
     }
+
     cb(null, true);
   },
 }).fields([
-  { name: "questionFile", maxCount: 1 },
-  { name: "markschemeFile", maxCount: 1 },
+  {
+    name: "questionFile",
+    maxCount: 1,
+  },
+  {
+    name: "markschemeFile",
+    maxCount: 1,
+  },
 ]);
 
 const videoUpload = multer({

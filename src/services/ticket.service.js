@@ -1,6 +1,9 @@
 const prisma = require("../config/prisma");
 const { getAssignedAssistantForStudent } = require("./assistantAssignment.service");
 const { notify } = require("./notification.service");
+const {
+  getSignedUrl,
+} = require("./storage.service");
 
 /**
  * Only the ticket's creator, its assigned assistant, or a Teacher/Head may see or act
@@ -14,6 +17,25 @@ function assertTicketAccess(ticket, user) {
   if (!isAdmin && !isCreator && !isAssignedAssistant) {
     throw { status: 403, msg: "You don't have access to this ticket" };
   }
+}
+
+async function addSignedAttachmentUrl(message) {
+  if (!message?.attachmentUrl) {
+    return message;
+  }
+
+  const signedUrl = await getSignedUrl(
+    message.attachmentUrl,
+    15
+  );
+
+  return {
+    ...message,
+
+    // The database keeps the private R2 object key.
+    // The frontend receives only a temporary usable URL.
+    attachmentUrl: signedUrl,
+  };
 }
 
 /** Student creates a ticket — auto-routed to their group's assigned assistant, per spec req #5. */
@@ -112,7 +134,16 @@ async function getTicketWithMessages(
 
   assertTicketAccess(ticket, user);
 
-  return ticket;
+  const messages = await Promise.all(
+    ticket.messages.map(
+      addSignedAttachmentUrl
+    )
+  );
+
+  return {
+    ...ticket,
+    messages,
+  };
 }
 
 /** Assistant marks a ticket resolved — this puts it in "pending student confirmation" state. */

@@ -2,12 +2,104 @@ const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 const { notify } = require("./notification.service");
 
-/** Student submits homework for a task. */
-async function submitHomework({ taskId, studentId, file }) {
+const MAX_TOTAL_FILES = 20;
+const MAX_CORRECTED_FILES = 20;
+
+function createServiceError(status, msg, data) {
+  const error = new Error(msg);
+
+  error.status = status;
+  error.msg = msg;
+
+  if (data !== undefined) {
+    error.data = data;
+  }
+
+  return error;
+}
+
+async function getSignedUrl(objectKey) {
+  if (!objectKey) {
+    return null;
+  }
+
+  return storage.getSignedUrl(objectKey, 15);
+}
+
+async function mapSubmissionFile(file) {
+  return {
+    id: file.id,
+    originalName: file.originalName,
+    contentType: file.contentType,
+    size: file.size,
+    order: file.order,
+    uploadedAfterDeadline:
+      file.uploadedAfterDeadline,
+    uploadedAt: file.uploadedAt,
+    fileUrl: await getSignedUrl(file.objectKey),
+  };
+}
+
+async function mapCorrectedFile(file) {
+  return {
+    id: file.id,
+    originalName: file.originalName,
+    contentType: file.contentType,
+    size: file.size,
+    order: file.order,
+    uploadedAt: file.uploadedAt,
+    uploadedById: file.uploadedById,
+    uploadedBy: file.uploadedBy || null,
+    fileUrl: await getSignedUrl(file.objectKey),
+  };
+}
+
+async function mapSubmission(submission) {
+  const [files, correctedFiles, legacyFileUrl, legacyCorrectedFileUrl] =
+    await Promise.all([
+      Promise.all(
+        (submission.files || []).map(mapSubmissionFile),
+      ),
+
+      Promise.all(
+        (submission.correctedFiles || []).map(
+          mapCorrectedFile,
+        ),
+      ),
+
+      getSignedUrl(submission.fileUrl),
+
+      getSignedUrl(submission.correctedFileUrl),
+    ]);
+
+  return {
+    ...submission,
+
+    fileUrl: legacyFileUrl,
+    correctedFileUrl: legacyCorrectedFileUrl,
+
+    files,
+    correctedFiles,
+
+    fileCount: files.length,
+    correctedFileCount: correctedFiles.length,
+
+    wasModifiedAfterDeadline:
+      submission.lastModifiedAfterDeadline,
+
+    canModify: submission.grade === null,
+  };
+}
+
+async function getTaskForStudent({
+  taskId,
+  studentId,
+}) {
   const task = await prisma.task.findUnique({
     where: {
       id: taskId,
     },
+
     include: {
       groups: {
         select: {
@@ -18,20 +110,28 @@ async function submitHomework({ taskId, studentId, file }) {
   });
 
   if (!task) {
-    throw {
-      status: 404,
-      msg: "Task not found",
-    };
+    throw createServiceError(
+      404,
+      "Task not found",
+    );
   }
 
   const taskGroupIds = task.groups.map(
     (taskGroup) => taskGroup.groupId,
   );
 
+  if (!taskGroupIds.length) {
+    throw createServiceError(
+      403,
+      "This task is not assigned to a group.",
+    );
+  }
+
   const membershipCount =
     await prisma.groupMembership.count({
       where: {
         studentId,
+
         groupId: {
           in: taskGroupIds,
         },
@@ -39,191 +139,1126 @@ async function submitHomework({ taskId, studentId, file }) {
     });
 
   if (membershipCount === 0) {
-    throw {
-      status: 403,
-      msg: "You are not assigned to this task",
+    throw createServiceError(
+      403,
+      "You are not assigned to this task",
+    );
+  }
+
+  return task;
+}
+
+function getModificationState(
+  task,
+  now = new Date(),
+) {
+  const deadline = new Date(task.deadline);
+
+  const afterDeadline =
+    Number.isFinite(deadline.getTime()) &&
+    now > deadline;
+
+  if (
+    afterDeadline &&
+    !task.allowLateSubmission
+  ) {
+    return {
+      allowed: false,
+      afterDeadline: true,
+      message:
+        "The deadline has passed and late submissions or modifications are not allowed for this task.",
     };
   }
 
-  if (!task.allowLateSubmission && new Date() > task.deadline) {
-    throw { status: 400, msg: "The deadline has passed and late submissions are not allowed for this task" };
-  }
-
-  const existing = await prisma.submission.findFirst({ where: { taskId, studentId } });
-  if (existing) throw { status: 400, msg: "You've already submitted this task" };
-
-  let fileUrl = null;
-  if (file) {
-    fileUrl = await storage.uploadBuffer(file.buffer, file.originalname, file.mimetype, "submissions");
-  }
-
-  return prisma.submission.create({ data: { taskId, studentId, fileUrl } });
+  return {
+    allowed: true,
+    afterDeadline,
+    message: afterDeadline
+      ? "This homework was modified after the deadline."
+      : null,
+  };
 }
 
-/** Direct grading — Teacher/Head, or an eligible assistant. */
-async function gradeSubmission({
-  submissionId,
-  grade,
-  comments,
-  correctedFile,
-  gradedBy,
+async function findStudentSubmission({
+  taskId,
+  studentId,
 }) {
-  const submission = await prisma.submission.findUnique({
+  return prisma.submission.findUnique({
     where: {
-      id: submissionId,
+      taskId_studentId: {
+        taskId,
+        studentId,
+      },
     },
+
     include: {
-      task: {
+      files: {
+        orderBy: {
+          order: "asc",
+        },
+      },
+
+      correctedFiles: {
         include: {
-          groups: {
+          uploadedBy: {
             select: {
-              groupId: true,
+              id: true,
+              name: true,
             },
           },
         },
+
+        orderBy: {
+          order: "asc",
+        },
       },
-      delegation: {
+
+      gradedBy: {
         select: {
           id: true,
-          assistantId: true,
-          completedAt: true,
+          name: true,
+          role: true,
+          isHeadAssistant: true,
+        },
+      },
+
+      task: {
+        select: {
+          id: true,
+          title: true,
+          deadline: true,
+          allowLateSubmission: true,
+          gradeOutOf: true,
         },
       },
     },
   });
+}
+
+async function submitHomework({
+  taskId,
+  studentId,
+  files,
+}) {
+  if (
+    !Array.isArray(files) ||
+    !files.length
+  ) {
+    throw createServiceError(
+      400,
+      "Select at least one homework file.",
+    );
+  }
+
+  const task = await getTaskForStudent({
+    taskId,
+    studentId,
+  });
+
+  const modificationState =
+    getModificationState(task);
+
+  if (!modificationState.allowed) {
+    throw createServiceError(
+      400,
+      modificationState.message,
+    );
+  }
+
+  let submission =
+    await findStudentSubmission({
+      taskId,
+      studentId,
+    });
+
+  if (
+    submission &&
+    submission.grade !== null
+  ) {
+    throw createServiceError(
+      409,
+      "This homework has already been graded and can no longer be modified.",
+    );
+  }
+
+  const existingFileCount =
+    submission?.files?.length || 0;
+
+  if (
+    existingFileCount + files.length >
+    MAX_TOTAL_FILES
+  ) {
+    throw createServiceError(
+      400,
+      `A homework submission may contain a maximum of ${MAX_TOTAL_FILES} files.`,
+      {
+        existingFileCount,
+        selectedFileCount: files.length,
+      },
+    );
+  }
+
+  const highestExistingOrder =
+    (submission?.files || []).reduce(
+      (highest, file) =>
+        Math.max(
+          highest,
+          Number(file.order || 0),
+        ),
+      -1,
+    );
+
+  const uploadedObjects = [];
+
+  try {
+    for (
+      let index = 0;
+      index < files.length;
+      index += 1
+    ) {
+      const file = files[index];
+
+      const originalName =
+        file.originalname ||
+        `homework-${index + 1}`;
+
+      const contentType =
+        file.mimetype ||
+        "application/octet-stream";
+
+      const objectKey =
+        await storage.uploadBuffer(
+          file.buffer,
+          originalName,
+          contentType,
+          `homework-submissions/${taskId}/${studentId}`,
+        );
+
+      uploadedObjects.push({
+        objectKey,
+        originalName,
+        contentType,
+
+        size: Number.isFinite(
+          Number(file.size),
+        )
+          ? Number(file.size)
+          : file.buffer.length,
+
+        order:
+          highestExistingOrder +
+          index +
+          1,
+
+        uploadedAfterDeadline:
+          modificationState.afterDeadline,
+      });
+    }
+
+    submission =
+      await prisma.$transaction(
+        async (tx) => {
+          let currentSubmission =
+            submission;
+
+          const now = new Date();
+
+          if (!currentSubmission) {
+            currentSubmission =
+              await tx.submission.create({
+                data: {
+                  taskId,
+                  studentId,
+                  firstSubmittedAt: now,
+                  submittedAt: now,
+                  lastModifiedAt: now,
+
+                  lastModifiedAfterDeadline:
+                    modificationState.afterDeadline,
+                },
+              });
+          } else {
+            currentSubmission =
+              await tx.submission.update({
+                where: {
+                  id: currentSubmission.id,
+                },
+
+                data: {
+                  submittedAt: now,
+                  lastModifiedAt: now,
+
+                  lastModifiedAfterDeadline:
+                    currentSubmission
+                      .lastModifiedAfterDeadline ||
+                    modificationState.afterDeadline,
+                },
+              });
+          }
+
+          await Promise.all(
+            uploadedObjects.map(
+              (uploadedFile) =>
+                tx.submissionFile.create({
+                  data: {
+                    submissionId:
+                      currentSubmission.id,
+
+                    objectKey:
+                      uploadedFile.objectKey,
+
+                    originalName:
+                      uploadedFile.originalName,
+
+                    contentType:
+                      uploadedFile.contentType,
+
+                    size:
+                      uploadedFile.size,
+
+                    order:
+                      uploadedFile.order,
+
+                    uploadedAfterDeadline:
+                      uploadedFile
+                        .uploadedAfterDeadline,
+
+                    uploadedById:
+                      studentId,
+                  },
+                }),
+            ),
+          );
+
+          return tx.submission.findUnique({
+            where: {
+              id: currentSubmission.id,
+            },
+
+            include: {
+              files: {
+                orderBy: {
+                  order: "asc",
+                },
+              },
+
+              correctedFiles: {
+                include: {
+                  uploadedBy: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+
+                orderBy: {
+                  order: "asc",
+                },
+              },
+
+              gradedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                  isHeadAssistant: true,
+                },
+              },
+
+              task: {
+                select: {
+                  id: true,
+                  title: true,
+                  deadline: true,
+                  allowLateSubmission: true,
+                  gradeOutOf: true,
+                },
+              },
+            },
+          });
+        },
+      );
+  } catch (error) {
+    await Promise.allSettled(
+      uploadedObjects.map(
+        (uploadedFile) =>
+          storage.deleteFile(
+            uploadedFile.objectKey,
+          ),
+      ),
+    );
+
+    throw error;
+  }
+
+  return mapSubmission(submission);
+}
+
+async function getMyHomeworkSubmission({
+  taskId,
+  studentId,
+}) {
+  await getTaskForStudent({
+    taskId,
+    studentId,
+  });
+
+  const submission =
+    await findStudentSubmission({
+      taskId,
+      studentId,
+    });
 
   if (!submission) {
-    throw {
-      status: 404,
-      msg: "Submission not found",
-    };
+    return null;
   }
 
+  const modificationState =
+    getModificationState(
+      submission.task,
+    );
+
+  const mapped =
+    await mapSubmission(submission);
+
+  return {
+    ...mapped,
+
+    canModify:
+      submission.grade === null &&
+      modificationState.allowed,
+
+    modificationBlockedReason:
+      submission.grade !== null
+        ? "This homework has already been graded."
+        : modificationState.allowed
+          ? null
+          : modificationState.message,
+  };
+}
+
+async function deleteHomeworkFile({
+  submissionId,
+  fileId,
+  studentId,
+}) {
+  const submission =
+    await prisma.submission.findFirst({
+      where: {
+        id: submissionId,
+        studentId,
+      },
+
+      include: {
+        files: {
+          orderBy: {
+            order: "asc",
+          },
+        },
+
+        task: {
+          select: {
+            id: true,
+            title: true,
+            deadline: true,
+            allowLateSubmission: true,
+            gradeOutOf: true,
+          },
+        },
+      },
+    });
+
+  if (!submission) {
+    throw createServiceError(
+      404,
+      "Homework submission not found.",
+    );
+  }
+
+  if (submission.grade !== null) {
+    throw createServiceError(
+      409,
+      "This homework has already been graded and its files cannot be changed.",
+    );
+  }
+
+  const modificationState =
+    getModificationState(
+      submission.task,
+    );
+
+  if (!modificationState.allowed) {
+    throw createServiceError(
+      400,
+      modificationState.message,
+    );
+  }
+
+  const file = submission.files.find(
+    (item) => item.id === fileId,
+  );
+
+  if (!file) {
+    throw createServiceError(
+      404,
+      "Homework file not found.",
+    );
+  }
+
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.submissionFile.delete({
+        where: {
+          id: file.id,
+        },
+      });
+
+      const remainingFiles =
+        await tx.submissionFile.findMany({
+          where: {
+            submissionId:
+              submission.id,
+          },
+
+          orderBy: {
+            order: "asc",
+          },
+        });
+
+      await Promise.all(
+        remainingFiles.map(
+          (remainingFile, index) =>
+            tx.submissionFile.update({
+              where: {
+                id: remainingFile.id,
+              },
+
+              data: {
+                order: index,
+              },
+            }),
+        ),
+      );
+
+      await tx.submission.update({
+        where: {
+          id: submission.id,
+        },
+
+        data: {
+          submittedAt: new Date(),
+          lastModifiedAt: new Date(),
+
+          lastModifiedAfterDeadline:
+            submission
+              .lastModifiedAfterDeadline ||
+            modificationState.afterDeadline,
+        },
+      });
+    },
+  );
+
+  try {
+    await storage.deleteFile(
+      file.objectKey,
+    );
+  } catch (error) {
+    console.error(
+      "Failed to remove homework file from R2:",
+      error.message,
+    );
+  }
+
+  const updatedSubmission =
+    await findStudentSubmission({
+      taskId: submission.taskId,
+      studentId,
+    });
+
+  return mapSubmission(
+    updatedSubmission,
+  );
+}
+
+async function assertCanGradeSubmission({
+  submission,
+  gradedBy,
+}) {
   if (!gradedBy) {
-    throw {
-      status: 401,
-      msg: "Unauthorized",
-    };
+    throw createServiceError(
+      401,
+      "Unauthorized",
+    );
   }
 
-  const isTeacher = gradedBy.role === "TEACHER";
+  const isTeacher =
+    gradedBy.role === "TEACHER";
+
   const isHeadAssistant =
     gradedBy.role === "ASSISTANT" &&
     gradedBy.isHeadAssistant === true;
 
-  if (!isTeacher && !isHeadAssistant) {
-    if (gradedBy.role !== "ASSISTANT") {
-      throw {
-        status: 403,
-        msg: "You are not allowed to grade this submission",
-      };
-    }
+  if (
+    isTeacher ||
+    isHeadAssistant
+  ) {
+    return;
+  }
 
-    const taskGroupIds = submission.task.groups.map(
-      (taskGroup) => taskGroup.groupId,
+  if (
+    gradedBy.role !== "ASSISTANT"
+  ) {
+    throw createServiceError(
+      403,
+      "You are not allowed to grade this submission",
+    );
+  }
+
+  const taskGroupIds =
+    submission.task.groups.map(
+      (taskGroup) =>
+        taskGroup.groupId,
     );
 
-    const assignmentCount =
-      await prisma.assistantGroupAssignment.count({
+  const assignmentCount =
+    await prisma
+      .assistantGroupAssignment
+      .count({
         where: {
           assistantId: gradedBy.id,
+
           groupId: {
             in: taskGroupIds,
           },
         },
       });
 
-    if (assignmentCount === 0) {
-      throw {
-        status: 403,
-        msg: "You are not assigned to this submission's group",
-      };
-    }
-
-    if (
-      submission.delegation &&
-      submission.delegation.assistantId !== gradedBy.id
-    ) {
-      throw {
-        status: 403,
-        msg: "This submission was delegated to another assistant",
-      };
-    }
+  if (assignmentCount === 0) {
+    throw createServiceError(
+      403,
+      "You are not assigned to this submission's group",
+    );
   }
 
-  const numericGrade = Number(grade);
-  const maximumGrade = Number(submission.task.gradeOutOf);
+  if (
+    !submission.delegation ||
+    submission.delegation
+      .assistantId !== gradedBy.id
+  ) {
+    throw createServiceError(
+      403,
+      "This submission has not been delegated to you",
+    );
+  }
+}
+
+async function uploadCorrectedFiles({
+  submissionId,
+  taskId,
+  files,
+  uploadedById,
+  startingOrder,
+}) {
+  const uploadedObjects = [];
+
+  for (
+    let index = 0;
+    index < files.length;
+    index += 1
+  ) {
+    const file = files[index];
+
+    const originalName =
+      file.originalname ||
+      `corrected-file-${index + 1}`;
+
+    const contentType =
+      file.mimetype ||
+      "application/octet-stream";
+
+    const objectKey =
+      await storage.uploadBuffer(
+        file.buffer,
+        originalName,
+        contentType,
+        `corrected-homework/${taskId}/${submissionId}`,
+      );
+
+    uploadedObjects.push({
+      objectKey,
+      originalName,
+      contentType,
+
+      size: Number.isFinite(
+        Number(file.size),
+      )
+        ? Number(file.size)
+        : file.buffer.length,
+
+      order:
+        startingOrder + index,
+
+      uploadedById,
+    });
+  }
+
+  return uploadedObjects;
+}
+
+async function gradeSubmission({
+  submissionId,
+  grade,
+  comments,
+  correctedFiles = [],
+  gradedBy,
+}) {
+  const submission =
+    await prisma.submission.findUnique({
+      where: {
+        id: submissionId,
+      },
+
+      include: {
+        task: {
+          include: {
+            groups: {
+              select: {
+                groupId: true,
+              },
+            },
+          },
+        },
+
+        delegation: {
+          select: {
+            id: true,
+            assistantId: true,
+            completedAt: true,
+          },
+        },
+
+        correctedFiles: {
+          orderBy: {
+            order: "asc",
+          },
+        },
+      },
+    });
+
+  if (!submission) {
+    throw createServiceError(
+      404,
+      "Submission not found",
+    );
+  }
+
+  await assertCanGradeSubmission({
+    submission,
+    gradedBy,
+  });
+
+  const numericGrade =
+    Number(grade);
+
+  const maximumGrade =
+    Number(
+      submission.task.gradeOutOf,
+    );
 
   if (!Number.isFinite(numericGrade)) {
-    throw {
-      status: 400,
-      msg: "Grade must be a valid number",
-    };
+    throw createServiceError(
+      400,
+      "Grade must be a valid number",
+    );
   }
 
   if (
     numericGrade < 0 ||
     numericGrade > maximumGrade
   ) {
-    throw {
-      status: 400,
-      msg: `Grade must be between 0 and ${maximumGrade}`,
-    };
-  }
-
-  let correctedFileUrl = submission.correctedFileUrl;
-
-  if (correctedFile) {
-    correctedFileUrl = await storage.uploadBuffer(
-      correctedFile.buffer,
-      correctedFile.originalname,
-      correctedFile.mimetype,
-      "corrected",
+    throw createServiceError(
+      400,
+      `Grade must be between 0 and ${maximumGrade}`,
     );
   }
 
-  const graded = await prisma.$transaction(async (tx) => {
-    const updatedSubmission = await tx.submission.update({
+  const normalizedComments =
+    typeof comments === "string"
+      ? comments.trim()
+      : "";
+
+  const incomingCorrectedFiles =
+    Array.isArray(correctedFiles)
+      ? correctedFiles
+      : [];
+
+  if (
+    submission.correctedFiles.length +
+      incomingCorrectedFiles.length >
+    MAX_CORRECTED_FILES
+  ) {
+    throw createServiceError(
+      400,
+      `A graded submission may contain a maximum of ${MAX_CORRECTED_FILES} corrected files.`,
+    );
+  }
+
+  const highestOrder =
+    submission.correctedFiles.reduce(
+      (highest, file) =>
+        Math.max(
+          highest,
+          Number(file.order || 0),
+        ),
+      -1,
+    );
+
+  let uploadedObjects = [];
+
+  try {
+    uploadedObjects =
+      await uploadCorrectedFiles({
+        submissionId,
+        taskId: submission.taskId,
+        files:
+          incomingCorrectedFiles,
+        uploadedById: gradedBy.id,
+        startingOrder:
+          highestOrder + 1,
+      });
+
+    const graded =
+      await prisma.$transaction(
+        async (tx) => {
+          const now = new Date();
+
+          if (uploadedObjects.length) {
+            await Promise.all(
+              uploadedObjects.map(
+                (uploadedFile) =>
+                  tx.correctedSubmissionFile.create({
+                    data: {
+                      submissionId,
+
+                      objectKey:
+                        uploadedFile.objectKey,
+
+                      originalName:
+                        uploadedFile.originalName,
+
+                      contentType:
+                        uploadedFile.contentType,
+
+                      size:
+                        uploadedFile.size,
+
+                      order:
+                        uploadedFile.order,
+
+                      uploadedById:
+                        uploadedFile.uploadedById,
+                    },
+                  }),
+              ),
+            );
+          }
+
+          const updatedSubmission =
+            await tx.submission.update({
+              where: {
+                id: submissionId,
+              },
+
+              data: {
+                grade: numericGrade,
+
+                comments:
+                  normalizedComments ||
+                  null,
+
+                gradedAt: now,
+
+                gradedById:
+                  gradedBy.id,
+              },
+            });
+
+          if (
+            submission.delegation &&
+            !submission.delegation.completedAt
+          ) {
+            await tx.delegation.update({
+              where: {
+                id:
+                  submission
+                    .delegation.id,
+              },
+
+              data: {
+                completedAt: now,
+              },
+            });
+
+            await tx
+              .submissionDelegationHistory
+              .create({
+                data: {
+                  submissionId,
+
+                  delegationId:
+                    submission
+                      .delegation.id,
+
+                  action: "COMPLETED",
+
+                  fromAssistantId:
+                    submission
+                      .delegation
+                      .assistantId,
+
+                  toAssistantId:
+                    submission
+                      .delegation
+                      .assistantId,
+
+                  changedById:
+                    gradedBy.id,
+
+                  reason:
+                    "Submission graded",
+                },
+              });
+          }
+
+          return tx.submission.findUnique({
+            where: {
+              id: updatedSubmission.id,
+            },
+
+            include: {
+              student: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+
+              files: {
+                orderBy: {
+                  order: "asc",
+                },
+              },
+
+              correctedFiles: {
+                include: {
+                  uploadedBy: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+
+                orderBy: {
+                  order: "asc",
+                },
+              },
+
+              gradedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                  role: true,
+                  isHeadAssistant: true,
+                },
+              },
+
+              delegation: {
+                include: {
+                  assistant: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+
+              task: {
+                select: {
+                  id: true,
+                  title: true,
+                  deadline: true,
+                  allowLateSubmission:
+                    true,
+                  gradeOutOf: true,
+                },
+              },
+            },
+          });
+        },
+      );
+
+    notify({
+      userId: submission.studentId,
+      type: "GRADE_POSTED",
+      title: "Your homework was graded",
+
+      body:
+        `You scored ${numericGrade}/${maximumGrade}`,
+
+      link:
+        `/my-tasks/${submission.taskId}`,
+    }).catch((error) =>
+      console.error(
+        "notify() failed:",
+        error.message,
+      ),
+    );
+
+    return mapSubmission(graded);
+  } catch (error) {
+    await Promise.allSettled(
+      uploadedObjects.map(
+        (uploadedFile) =>
+          storage.deleteFile(
+            uploadedFile.objectKey,
+          ),
+      ),
+    );
+
+    throw error;
+  }
+}
+
+async function deleteCorrectedFile({
+  submissionId,
+  correctedFileId,
+  requestedBy,
+}) {
+  if (!requestedBy) {
+    throw createServiceError(
+      401,
+      "Unauthorized",
+    );
+  }
+
+  const submission =
+    await prisma.submission.findUnique({
       where: {
         id: submissionId,
       },
-      data: {
-        grade: numericGrade,
-        comments,
-        correctedFileUrl,
-        gradedAt: new Date(),
+
+      include: {
+        task: {
+          include: {
+            groups: {
+              select: {
+                groupId: true,
+              },
+            },
+          },
+        },
+
+        delegation: {
+          select: {
+            id: true,
+            assistantId: true,
+            completedAt: true,
+          },
+        },
+
+        correctedFiles: {
+          orderBy: {
+            order: "asc",
+          },
+        },
       },
     });
 
-    if (
-      submission.delegation &&
-      submission.delegation.assistantId === gradedBy.id &&
-      !submission.delegation.completedAt
-    ) {
-      await tx.delegation.update({
-        where: {
-          id: submission.delegation.id,
-        },
-        data: {
-          completedAt: new Date(),
-        },
-      });
-    }
+  if (!submission) {
+    throw createServiceError(
+      404,
+      "Submission not found",
+    );
+  }
 
-    return updatedSubmission;
+  await assertCanGradeSubmission({
+    submission,
+    gradedBy: requestedBy,
   });
 
-  notify({
-    userId: submission.studentId,
-    type: "GRADE_POSTED",
-    title: "Your homework was graded",
-    body: `You scored ${numericGrade}/${maximumGrade}`,
-    link: `/my-tasks/${submission.taskId}`,
-  }).catch((err) =>
-    console.error("notify() failed:", err.message),
+  const correctedFile =
+    submission.correctedFiles.find(
+      (file) =>
+        file.id === correctedFileId,
+    );
+
+  if (!correctedFile) {
+    throw createServiceError(
+      404,
+      "Corrected file not found",
+    );
+  }
+
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.correctedSubmissionFile.delete({
+        where: {
+          id: correctedFile.id,
+        },
+      });
+
+      const remainingFiles =
+        await tx.correctedSubmissionFile.findMany({
+          where: {
+            submissionId,
+          },
+
+          orderBy: {
+            order: "asc",
+          },
+        });
+
+      await Promise.all(
+        remainingFiles.map(
+          (file, index) =>
+            tx.correctedSubmissionFile.update({
+              where: {
+                id: file.id,
+              },
+
+              data: {
+                order: index,
+              },
+            }),
+        ),
+      );
+    },
   );
 
-  return graded;
+  try {
+    await storage.deleteFile(
+      correctedFile.objectKey,
+    );
+  } catch (error) {
+    console.error(
+      "Failed to delete corrected file from R2:",
+      error.message,
+    );
+  }
+
+  return {
+    deletedFileId: correctedFile.id,
+  };
 }
 
-module.exports = { submitHomework, gradeSubmission };
+module.exports = {
+  submitHomework,
+  getMyHomeworkSubmission,
+  deleteHomeworkFile,
+  gradeSubmission,
+  deleteCorrectedFile,
+  mapSubmission,
+};

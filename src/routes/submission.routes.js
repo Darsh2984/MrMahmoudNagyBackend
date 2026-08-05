@@ -1,23 +1,57 @@
 const express = require("express");
-const router = express.Router();
-const submissionController = require("../controllers/submission.controller");
-const { requireRole, requireAssistantPermission } = require("../middleware/rbac.middleware");
-const { materialUpload } = require("../middleware/upload.middleware");
 
-// Student submits their homework file
+const router = express.Router();
+
+const submissionController =
+  require("../controllers/submission.controller");
+
+const {
+  requireRole,
+  requireAssistantPermission,
+} = require("../middleware/rbac.middleware");
+
+const {
+  homeworkFilesUpload,
+} = require("../middleware/homeworkUpload.middleware");
+
+const {
+  correctedHomeworkUpload,
+} = require("../middleware/correctedHomeworkUpload.middleware");
+
 router.post(
   "/task/:taskId",
   requireRole("STUDENT"),
-  materialUpload.single("file"),
-  submissionController.submitHomework
+  homeworkFilesUpload,
+  submissionController.submitHomework,
 );
 
-// Direct grading (no delegation) — Teacher/Head or an assistant with canGradeHomework
+router.get(
+  "/task/:taskId/mine",
+  requireRole("STUDENT"),
+  submissionController.getMyHomeworkSubmission,
+);
+
+router.delete(
+  "/:submissionId/files/:fileId",
+  requireRole("STUDENT"),
+  submissionController.deleteHomeworkFile,
+);
+
 router.patch(
   "/:submissionId/grade",
-  requireAssistantPermission("canGradeHomework"),
-  materialUpload.single("correctedFile"),
-  submissionController.gradeSubmission
+  requireAssistantPermission(
+    "canGradeHomework",
+  ),
+  correctedHomeworkUpload,
+  submissionController.gradeSubmission,
+);
+
+router.delete(
+  "/:submissionId/corrected-files/:correctedFileId",
+  requireAssistantPermission(
+    "canGradeHomework",
+  ),
+  submissionController.deleteCorrectedFile,
 );
 
 module.exports = router;

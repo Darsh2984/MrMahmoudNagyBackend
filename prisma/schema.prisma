@@ -65,12 +65,19 @@ enum TicketMessageType {
   FILE
 }
 
+enum DelegationAction {
+  ASSIGNED
+  REASSIGNED
+  REMOVED
+  COMPLETED
+}
+
 // ---------------- Core: Users & Org structure ----------------
 
 model User {
-  id       String @id @default(uuid())
+  id       String  @id @default(uuid())
   name     String
-  email    String @unique
+  email    String  @unique
   password String? // null until activated, e.g. first-login flows
 
   role Role
@@ -86,9 +93,9 @@ model User {
   // - Before any assistant is promoted to Head, assistants report to the Teacher (managedByHeadId = null).
   // - Once at least one Head of Assistants exists, every non-head assistant must report to one (managedByHeadId set).
   // - Head Assistants themselves are not managed by another head (managedByHeadId stays null for them).
-  managedByHeadId String?
-  managedByHead   User?   @relation("HeadManagesAssistants", fields: [managedByHeadId], references: [id])
-  managedAssistants User[] @relation("HeadManagesAssistants")
+  managedByHeadId   String?
+  managedByHead     User?   @relation("HeadManagesAssistants", fields: [managedByHeadId], references: [id])
+  managedAssistants User[]  @relation("HeadManagesAssistants")
 
   // Per-assistant permission flags (only meaningful when role == ASSISTANT)
   // e.g. { "canGradeHomework": true, "canManageTickets": false, ... }
@@ -116,34 +123,48 @@ model User {
   updatedAt DateTime @updatedAt
 
   // Relations (as teacher/creator)
-  yearsCreated    Year[]              @relation("YearTeacher")
-  unitsCreated    Unit[]              @relation("UnitTeacher")
-  materials       Material[]          @relation("MaterialTeacher")
-  videos          Video[]             @relation("VideoTeacher")
-  questions       Question[]          @relation("QuestionTeacher")
-  quizzes         Quiz[]              @relation("QuizTeacher")
-  sessionsHosted  Session[]           @relation("SessionTeacher")
-  tasksCreated    Task[]              @relation("TaskTeacher")
+  yearsCreated   Year[]     @relation("YearTeacher")
+  unitsCreated   Unit[]     @relation("UnitTeacher")
+  materials      Material[] @relation("MaterialTeacher")
+  videos         Video[]    @relation("VideoTeacher")
+  questions      Question[] @relation("QuestionTeacher")
+  quizzes        Quiz[]     @relation("QuizTeacher")
+  sessionsHosted Session[]  @relation("SessionTeacher")
+  tasksCreated   Task[]     @relation("TaskTeacher")
 
   // Relations (as student)
-  groupMemberships   GroupMembership[]
-  quizSubmissions    QuizSubmission[]
-  submissions        Submission[]        @relation("StudentSubmissions")
-  liveAnswers        LiveQuestionAnswer[] @relation("StudentLiveAnswers")
-  attendanceRecords  SessionAttendance[]
-  ticketsCreated     Ticket[]            @relation("TicketCreatedBy")
-  ticketCategoriesCreated TicketCategory[] @relation("TicketCategoryCreatedBy")
+  groupMemberships        GroupMembership[]
+  quizSubmissions         QuizSubmission[]
+  submissions             Submission[]         @relation("StudentSubmissions")
+  liveAnswers             LiveQuestionAnswer[] @relation("StudentLiveAnswers")
+  attendanceRecords       SessionAttendance[]
+  ticketsCreated          Ticket[]             @relation("TicketCreatedBy")
+  ticketCategoriesCreated TicketCategory[]     @relation("TicketCategoryCreatedBy")
 
   // Relations (as assistant)
-  groupAssignments      AssistantGroupAssignment[]
-  delegationsReceived   Delegation[]        @relation("AssistantDelegations")
-  delegationsAssigned   Delegation[]        @relation("DelegatedBy")
-  gradedLiveAnswers     LiveQuestionAnswer[] @relation("GradedBy")
-  ticketsAssigned       Ticket[]            @relation("TicketAssignedTo")
-  ticketMessagesSent    TicketMessage[]
+  groupAssignments    AssistantGroupAssignment[]
+  delegationsReceived Delegation[]               @relation("AssistantDelegations")
+  delegationsAssigned Delegation[]               @relation("DelegatedBy")
+  gradedLiveAnswers   LiveQuestionAnswer[]       @relation("GradedBy")
+  ticketsAssigned     Ticket[]                   @relation("TicketAssignedTo")
+  ticketMessagesSent  TicketMessage[]
+
+  paperQuizSubmissionsGraded QuizSubmission[] @relation("PaperQuizGradedBy")
 
   notifications Notification[]
   pushTokens    PushToken[]
+
+  homeworkFilesUploaded SubmissionFile[] @relation("SubmissionFileUploadedBy")
+
+  correctedHomeworkFilesUploaded CorrectedSubmissionFile[] @relation("CorrectedSubmissionFileUploadedBy")
+
+  homeworkSubmissionsGraded Submission[] @relation("HomeworkGradedBy")
+
+  delegationHistoryFrom SubmissionDelegationHistory[] @relation("DelegationHistoryFromAssistant")
+
+  delegationHistoryTo SubmissionDelegationHistory[] @relation("DelegationHistoryToAssistant")
+
+  delegationHistoryChanged SubmissionDelegationHistory[] @relation("DelegationHistoryChangedBy")
 
   @@index([role])
   @@index([managedByHeadId])
@@ -165,7 +186,6 @@ model Year {
   teacher   User     @relation("YearTeacher", fields: [teacherId], references: [id])
   zoomLinks Json? // [{ title, link }]
   groups    Group[]
-  units     Unit[]
   createdAt DateTime @default(now())
 }
 
@@ -176,11 +196,11 @@ model Group {
   year      Year     @relation(fields: [yearId], references: [id])
   createdAt DateTime @default(now())
 
-  members            GroupMembership[]
+  members              GroupMembership[]
   assistantAssignments AssistantGroupAssignment[]
-  sessions           Session[]
-  tasks              TaskGroup[]
-  quizzes            QuizGroup[]
+  sessions             Session[]
+  tasks                TaskGroup[]
+  quizzes              QuizGroup[]
 }
 
 model GroupMembership {
@@ -205,17 +225,18 @@ model AssistantGroupAssignment {
 }
 
 model Unit {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   name      String
-  yearId    String
-  year      Year     @relation(fields: [yearId], references: [id])
   teacherId String
-  teacher   User     @relation("UnitTeacher", fields: [teacherId], references: [id])
-  createdAt DateTime @default(now())
-
+  teacher   User       @relation("UnitTeacher", fields: [teacherId], references: [id])
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @default(now()) @updatedAt
   chapters  Chapter[]
   materials Material[] @relation("MaterialUnit")
   videos    Video[]    @relation("VideoUnit")
+
+  @@index([name])
+  @@index([teacherId])
 }
 
 model Chapter {
@@ -238,8 +259,8 @@ model Topic {
   chapter   Chapter  @relation(fields: [chapterId], references: [id])
   createdAt DateTime @default(now())
 
-  materials Material[] @relation("MaterialTopic")
-  videos    Video[]    @relation("VideoTopic")
+  materials    Material[]      @relation("MaterialTopic")
+  videos       Video[]         @relation("VideoTopic")
   // A question can tag multiple topics, and a topic can have many questions tagged
   // to it — this is a real many-to-many, unlike Material/Video's single-attachment.
   questionTags QuestionTopic[]
@@ -295,31 +316,46 @@ enum QuestionType {
   WRITTEN
 }
 
+enum QuizType {
+  MCQ
+  PAPER
+}
+
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
 model Question {
   id        String       @id @default(uuid())
+  title     String       @default("Untitled question")
+  reference String?
   type      QuestionType
+  points    Float        @default(1)
 
-  // Always required — the question itself, uploaded as a PDF.
+  // Private R2 object key for the question PDF or image.
   questionFileUrl String
 
-  // MCQ-only: the correct option.
-  correctAnswer String? // "A" | "B" | "C" | "D" — required when type == MCQ
+  // MCQ only: A, B, C, or D.
+  correctAnswer String?
 
-  // WRITTEN-only: the markscheme, also a PDF, since these are graded manually
-  // against it rather than auto-checked like an MCQ.
-  markschemeFileUrl String? // required when type == WRITTEN
+  // Written only. Optional but recommended.
+  markschemeFileUrl String?
 
   teacherId String
-  teacher   User     @relation("QuestionTeacher", fields: [teacherId], references: [id])
+  teacher   User   @relation("QuestionTeacher", fields: [teacherId], references: [id])
+
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
-  // A question can tag multiple topics from the hierarchy (per spec — e.g. a question
-  // might span two related topics). This is what will eventually let a student ask
-  // "give me practice questions about topic X."
-  topics QuestionTopic[]
-
+  topics      QuestionTopic[]
   checkpoints VideoCheckpoint[] @relation("CheckpointQuestions")
   quizzes     QuizQuestion[]
+
+  @@index([teacherId])
+  @@index([type])
+  @@index([title])
 }
 
 // Join table for Question <-> Topic many-to-many tagging.
@@ -336,64 +372,167 @@ model QuestionTopic {
 // ---------------- Quizzes ----------------
 
 model Quiz {
-  id        String   @id @default(uuid())
-  title     String
+  id          String  @id @default(uuid())
+  title       String
+  description String?
+
+  type   QuizType   @default(MCQ)
+  status QuizStatus @default(DRAFT)
+
   teacherId String
-  teacher   User     @relation("QuizTeacher", fields: [teacherId], references: [id])
-  duration  Int // minutes
-  startTime DateTime?
-  endTime   DateTime?
-  createdAt DateTime @default(now())
+  teacher   User   @relation("QuizTeacher", fields: [teacherId], references: [id])
+
+  // These @map values preserve the existing database column names.
+  // Prisma code will use durationMinutes, startAt, and endAt.
+  durationMinutes Int       @map("duration")
+  startAt         DateTime? @map("startTime")
+  endAt           DateTime? @map("endTime")
+
+  // Stored for fast display and validation.
+  // It will be recalculated from QuizQuestion.points.
+  totalPoints Float @default(0)
+
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
 
   groups      QuizGroup[]
   questions   QuizQuestion[]
   submissions QuizSubmission[]
+
+  @@index([teacherId])
+  @@index([type])
+  @@index([status])
+  @@index([startAt])
+  @@index([endAt])
 }
 
 model QuizGroup {
-  id      String @id @default(uuid())
-  quizId  String
-  quiz    Quiz   @relation(fields: [quizId], references: [id])
+  id String @id @default(uuid())
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
   groupId String
   group   Group  @relation(fields: [groupId], references: [id])
 
+  assignedAt DateTime @default(now())
+
   @@unique([quizId, groupId])
+  @@index([groupId])
 }
 
 model QuizQuestion {
-  id         String   @id @default(uuid())
-  quizId     String
-  quiz       Quiz     @relation(fields: [quizId], references: [id])
+  id String @id @default(uuid())
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
   questionId String
   question   Question @relation(fields: [questionId], references: [id])
 
+  // Controls the displayed question sequence.
+  order Int @default(0)
+
+  // A quiz may override the Question Bank default points.
+  // Existing records can safely receive the default value.
+  points Float @default(1)
+
+  createdAt DateTime @default(now())
+
   @@unique([quizId, questionId])
+  @@index([quizId, order])
+  @@index([questionId])
 }
 
 model QuizSubmission {
-  id          String    @id @default(uuid())
-  quizId      String
-  quiz        Quiz      @relation(fields: [quizId], references: [id])
-  studentId   String
-  student     User      @relation(fields: [studentId], references: [id])
-  answers     Json // [{ questionId, answer, isCorrect }]
+  id String @id @default(uuid())
+
+  quizId String
+  quiz   Quiz   @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  // MCQ format:
+  // [
+  //   {
+  //     "questionId": "...",
+  //     "answerText": "A"
+  //   }
+  // ]
+  //
+  // PAPER quizzes keep this as [] and use PaperQuizSubmissionFile.
+  answers Json
+
   score       Float     @default(0)
   startedAt   DateTime  @default(now())
+  expiresAt   DateTime?
   submittedAt DateTime?
-  isSubmitted Boolean   @default(false)
+
+  isSubmitted     Boolean @default(false)
+  isAutoSubmitted Boolean @default(false)
+
+  // PAPER quiz only:
+  // Private R2 object key for the generated combined question paper.
+  paperFileKey String?
+
+  // Used to determine whether the generated paper is still current.
+  paperGeneratedAt DateTime?
+
+  // PAPER quiz grading state.
+  isGraded Boolean @default(false)
+
+  gradedAt   DateTime?
+  gradedById String?
+  gradedBy   User?     @relation("PaperQuizGradedBy", fields: [gradedById], references: [id])
+
+  gradingComments String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  paperFiles PaperQuizSubmissionFile[]
+
+  @@unique([quizId, studentId])
+  @@index([quizId])
+  @@index([studentId])
+  @@index([isSubmitted])
+  @@index([isGraded])
+}
+
+model PaperQuizSubmissionFile {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   QuizSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  // Private Cloudflare R2 object key.
+  objectKey String
+
+  originalName String
+  contentType  String
+  size         Int?
+
+  // Preserves the student's upload order.
+  order Int @default(0)
+
+  uploadedAt DateTime @default(now())
+
+  @@index([submissionId, order])
 }
 
 // In-class quick quizzes (teacher-graded groups of students, not question-bank based)
 model InClassQuiz {
-  id          String   @id @default(uuid())
-  teacherId   String
-  yearId      String
-  groupId     String
-  quizName    String
-  date        DateTime
-  gradeOutOf  Float
+  id            String   @id @default(uuid())
+  teacherId     String
+  yearId        String
+  groupId       String
+  quizName      String
+  date          DateTime
+  gradeOutOf    Float
   studentGrades Json // [{ studentId, grade, percentage, letterGrade }]
-  createdAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
 }
 
 // NOTE: QuizStopQuestion (a standalone "stop and answer" question type) was merged into
@@ -462,21 +601,21 @@ model LiveQuestionAnswer {
 // ---------------- Homework / Tasks / Delegation ----------------
 
 model Task {
-  id          String   @id @default(uuid())
-  title       String
-  description String?
-  teacherId   String
-  teacher     User     @relation("TaskTeacher", fields: [teacherId], references: [id])
-  yearId      String
-  deadline    DateTime
-  gradeOutOf  Float
+  id                  String   @id @default(uuid())
+  title               String
+  description         String?
+  teacherId           String
+  teacher             User     @relation("TaskTeacher", fields: [teacherId], references: [id])
+  yearId              String
+  deadline            DateTime
+  gradeOutOf          Float
   // Optional PDF of the homework itself, uploaded by teacher/assistant (req: student
   // sees instructions + this file, if provided).
-  taskFileUrl String?
+  taskFileUrl         String?
   // Editable after creation — teacher/assistant decides whether submissions are
   // still accepted after the deadline passes. Enforced server-side in submission.service.js.
-  allowLateSubmission Boolean @default(true)
-  createdAt   DateTime @default(now())
+  allowLateSubmission Boolean  @default(true)
+  createdAt           DateTime @default(now())
 
   groups      TaskGroup[]
   submissions Submission[]
@@ -493,35 +632,157 @@ model TaskGroup {
 }
 
 model Submission {
-  id                String    @id @default(uuid())
-  taskId            String
-  task              Task      @relation(fields: [taskId], references: [id])
-  studentId         String
-  student           User      @relation("StudentSubmissions", fields: [studentId], references: [id])
-  fileUrl           String?
-  submittedAt       DateTime  @default(now())
-  grade             Float?
-  comments          String?
-  correctedFileUrl  String?
-  gradedAt          DateTime?
+  id String @id @default(uuid())
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   User   @relation("StudentSubmissions", fields: [studentId], references: [id])
+
+  // Legacy single-file field.
+  // Keep temporarily so existing production records remain readable.
+  fileUrl String?
+
+  firstSubmittedAt DateTime @default(now())
+  submittedAt      DateTime @default(now())
+  lastModifiedAt   DateTime @default(now())
+
+  lastModifiedAfterDeadline Boolean @default(false)
+
+  grade Float?
+
+  // Student-visible grading comments.
+  comments String?
+
+  gradedAt DateTime?
+
+  gradedById String?
+  gradedBy   User?   @relation("HomeworkGradedBy", fields: [gradedById], references: [id])
+
+  // Legacy single corrected-file field.
+  // Keep temporarily for existing records.
+  correctedFileUrl String?
+
+  files SubmissionFile[]
+
+  correctedFiles CorrectedSubmissionFile[]
 
   delegation Delegation?
+
+  delegationHistory SubmissionDelegationHistory[]
+
+  @@unique([taskId, studentId])
+  @@index([taskId])
+  @@index([studentId])
+  @@index([gradedAt])
+  @@index([gradedById])
+  @@index([lastModifiedAfterDeadline])
+}
+
+model SubmissionFile {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  objectKey String
+
+  originalName String
+  contentType  String
+  size         Int?
+
+  order Int @default(0)
+
+  uploadedAfterDeadline Boolean @default(false)
+
+  uploadedById String
+  uploadedBy   User   @relation("SubmissionFileUploadedBy", fields: [uploadedById], references: [id])
+
+  uploadedAt DateTime @default(now())
+
+  @@index([submissionId, order])
+  @@index([uploadedById])
+  @@index([uploadedAfterDeadline])
+}
+
+model CorrectedSubmissionFile {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  objectKey String
+
+  originalName String
+  contentType  String
+  size         Int?
+
+  order Int @default(0)
+
+  uploadedById String
+  uploadedBy   User   @relation("CorrectedSubmissionFileUploadedBy", fields: [uploadedById], references: [id])
+
+  uploadedAt DateTime @default(now())
+
+  @@index([submissionId, order])
+  @@index([uploadedById])
 }
 
 // Requirement #9: delegate submitted papers to assistants for grading,
 // with tracking per assistant per period (for salary calc).
 model Delegation {
-  id            String    @id @default(uuid())
-  submissionId  String    @unique
-  submission    Submission @relation(fields: [submissionId], references: [id])
-  assistantId   String
-  assistant     User      @relation("AssistantDelegations", fields: [assistantId], references: [id])
+  id String @id @default(uuid())
+
+  submissionId String     @unique
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  assistantId String
+  assistant   User   @relation("AssistantDelegations", fields: [assistantId], references: [id])
+
   delegatedById String
-  delegatedBy   User      @relation("DelegatedBy", fields: [delegatedById], references: [id])
-  delegatedAt   DateTime  @default(now())
-  completedAt   DateTime?
+  delegatedBy   User   @relation("DelegatedBy", fields: [delegatedById], references: [id])
+
+  delegatedAt DateTime @default(now())
+
+  completedAt DateTime?
+
+  history SubmissionDelegationHistory[]
 
   @@index([assistantId, delegatedAt])
+  @@index([completedAt])
+}
+
+model SubmissionDelegationHistory {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  delegationId String?
+  delegation   Delegation? @relation(fields: [delegationId], references: [id], onDelete: SetNull)
+
+  action DelegationAction
+
+  fromAssistantId String?
+  fromAssistant   User?   @relation("DelegationHistoryFromAssistant", fields: [fromAssistantId], references: [id])
+
+  toAssistantId String?
+  toAssistant   User?   @relation("DelegationHistoryToAssistant", fields: [toAssistantId], references: [id])
+
+  changedById String
+  changedBy   User   @relation("DelegationHistoryChangedBy", fields: [changedById], references: [id])
+
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([submissionId, createdAt])
+  @@index([delegationId])
+  @@index([fromAssistantId])
+  @@index([toAssistantId])
+  @@index([changedById])
+  @@index([action])
 }
 
 // ---------------- Tickets / Support ----------------
@@ -538,19 +799,19 @@ model TicketCategory {
 }
 
 model Ticket {
-  id         String            @id @default(uuid())
+  id          String         @id @default(uuid())
   createdById String
-  createdBy   User             @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  createdBy   User           @relation("TicketCreatedBy", fields: [createdById], references: [id])
   categoryId  String
-  category    TicketCategory   @relation(fields: [categoryId], references: [id])
+  category    TicketCategory @relation(fields: [categoryId], references: [id])
   subject     String
 
   // Auto-filled from the student's group's AssistantGroupAssignment
   assignedAssistantId String?
-  assignedAssistant    User?   @relation("TicketAssignedTo", fields: [assignedAssistantId], references: [id])
+  assignedAssistant   User?   @relation("TicketAssignedTo", fields: [assignedAssistantId], references: [id])
 
   status                   ResolutionStatus @default(OPEN)
-  studentConfirmedResolved Boolean?         // null = not asked yet, true/false = student's answer
+  studentConfirmedResolved Boolean? // null = not asked yet, true/false = student's answer
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -601,11 +862,11 @@ model Notification {
 }
 
 model PushToken {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  expoToken  String   @unique
-  platform   String // "ios" | "android" | "web"
-  updatedAt  DateTime @updatedAt
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  expoToken String   @unique
+  platform  String // "ios" | "android" | "web"
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 }

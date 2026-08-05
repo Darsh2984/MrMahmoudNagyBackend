@@ -69,7 +69,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/years", yearRoutes);
 app.use("/api/schools", schoolRoutes);
 app.use("/api/questions", questionRoutes);
-app.use("/api/quiz", quizRoutes);
+app.use("/api/quizzes", quizRoutes);
 app.use("/api/quiz-student", quizStudentRoutes);
 app.use("/api/inclassquiz", inClassQuizRoutes);
 app.use("/api/videocheckpoint", videoCheckpointRoutes);

@@ -13,34 +13,43 @@ const {
   getSignedUrl: createPresignedUrl,
 } = require("@aws-sdk/s3-request-presigner");
 
+function createStorageError(status, msg) {
+  const error = new Error(msg);
+
+  error.status = status;
+  error.msg = msg;
+
+  return error;
+}
+
 function getRequiredEnvironmentVariable(name) {
   const value = process.env[name];
 
   if (!value) {
-    throw {
-      status: 500,
-      msg: `${name} is not configured`,
-    };
+    throw createStorageError(
+      500,
+      `${name} is not configured`,
+    );
   }
 
   return value;
 }
 
 const accountId = getRequiredEnvironmentVariable(
-  "R2_ACCOUNT_ID"
+  "R2_ACCOUNT_ID",
 );
 
 const accessKeyId = getRequiredEnvironmentVariable(
-  "R2_ACCESS_KEY_ID"
+  "R2_ACCESS_KEY_ID",
 );
 
 const secretAccessKey =
   getRequiredEnvironmentVariable(
-    "R2_SECRET_ACCESS_KEY"
+    "R2_SECRET_ACCESS_KEY",
   );
 
 const bucketName = getRequiredEnvironmentVariable(
-  "R2_BUCKET_NAME"
+  "R2_BUCKET_NAME",
 );
 
 const r2 = new S3Client({
@@ -77,24 +86,67 @@ function normalizeExtension(originalFilename) {
     .replace(/[^a-z0-9.]/g, "");
 }
 
+function getHttpStatusCode(error) {
+  return error?.$metadata?.httpStatusCode;
+}
+
+function handleStoredFileError(error) {
+  const statusCode = getHttpStatusCode(error);
+
+  if (statusCode === 404) {
+    throw createStorageError(
+      404,
+      "Stored file was not found",
+    );
+  }
+
+  throw error;
+}
+
+async function streamToBuffer(body) {
+  if (!body) {
+    throw createStorageError(
+      500,
+      "The stored file returned no content",
+    );
+  }
+
+  if (typeof body.transformToByteArray === "function") {
+    const bytes = await body.transformToByteArray();
+
+    return Buffer.from(bytes);
+  }
+
+  const chunks = [];
+
+  for await (const chunk of body) {
+    chunks.push(
+      Buffer.isBuffer(chunk)
+        ? chunk
+        : Buffer.from(chunk),
+    );
+  }
+
+  return Buffer.concat(chunks);
+}
+
 async function uploadBuffer(
   buffer,
   originalFilename,
   mimetype,
-  folder = "misc"
+  folder = "misc",
 ) {
   if (
     !Buffer.isBuffer(buffer) ||
     buffer.length === 0
   ) {
-    throw {
-      status: 400,
-      msg: "The uploaded file is empty",
-    };
+    throw createStorageError(
+      400,
+      "The uploaded file is empty",
+    );
   }
 
-  const safeFolder =
-    normalizeFolder(folder);
+  const safeFolder = normalizeFolder(folder);
 
   const extension =
     normalizeExtension(originalFilename);
@@ -118,16 +170,76 @@ async function uploadBuffer(
         "private, max-age=0, no-transform",
 
       Metadata: {
-        originalname:
-          encodeURIComponent(
-            originalFilename ||
-              "uploaded-file"
-          ),
+        originalname: encodeURIComponent(
+          originalFilename ||
+            "uploaded-file",
+        ),
       },
-    })
+    }),
   );
 
   return objectName;
+}
+
+async function downloadBuffer(objectName) {
+  if (
+    !objectName ||
+    typeof objectName !== "string"
+  ) {
+    throw createStorageError(
+      400,
+      "A stored object key is required",
+    );
+  }
+
+  let response;
+
+  try {
+    response = await r2.send(
+      new GetObjectCommand({
+        Bucket: bucketName,
+        Key: objectName,
+      }),
+    );
+  } catch (error) {
+    handleStoredFileError(error);
+  }
+
+  const buffer = await streamToBuffer(
+    response.Body,
+  );
+
+  if (!buffer.length) {
+    throw createStorageError(
+      500,
+      "The stored file is empty",
+    );
+  }
+
+  let originalName = null;
+
+  if (response.Metadata?.originalname) {
+    try {
+      originalName = decodeURIComponent(
+        response.Metadata.originalname,
+      );
+    } catch {
+      originalName =
+        response.Metadata.originalname;
+    }
+  }
+
+  return {
+    buffer,
+
+    contentType:
+      response.ContentType ||
+      "application/octet-stream",
+
+    size: buffer.length,
+
+    originalName,
+  };
 }
 
 async function deleteFile(objectName) {
@@ -143,19 +255,19 @@ async function deleteFile(objectName) {
       new DeleteObjectCommand({
         Bucket: bucketName,
         Key: objectName,
-      })
+      }),
     );
   } catch (error) {
     console.error(
       "R2 delete failed:",
-      error.message
+      error.message,
     );
   }
 }
 
 async function getSignedUrl(
   objectName,
-  expiresInMinutes = 5
+  expiresInMinutes = 5,
 ) {
   if (
     !objectName ||
@@ -169,8 +281,8 @@ async function getSignedUrl(
       1,
       Math.min(
         Number(expiresInMinutes) || 5,
-        60
-      )
+        60,
+      ),
     ) * 60;
 
   try {
@@ -178,20 +290,10 @@ async function getSignedUrl(
       new HeadObjectCommand({
         Bucket: bucketName,
         Key: objectName,
-      })
+      }),
     );
   } catch (error) {
-    const statusCode =
-      error?.$metadata?.httpStatusCode;
-
-    if (statusCode === 404) {
-      throw {
-        status: 404,
-        msg: "Stored file was not found",
-      };
-    }
-
-    throw error;
+    handleStoredFileError(error);
   }
 
   return createPresignedUrl(
@@ -202,7 +304,7 @@ async function getSignedUrl(
     }),
     {
       expiresIn: expiresInSeconds,
-    }
+    },
   );
 }
 
@@ -221,30 +323,19 @@ async function getFileMetadata(objectName) {
       new HeadObjectCommand({
         Bucket: bucketName,
         Key: objectName,
-      })
+      }),
     );
   } catch (error) {
-    const statusCode =
-      error?.$metadata?.httpStatusCode;
-
-    if (statusCode === 404) {
-      throw {
-        status: 404,
-        msg: "Stored file was not found",
-      };
-    }
-
-    throw error;
+    handleStoredFileError(error);
   }
 
   let originalName = null;
 
   if (response.Metadata?.originalname) {
     try {
-      originalName =
-        decodeURIComponent(
-          response.Metadata.originalname
-        );
+      originalName = decodeURIComponent(
+        response.Metadata.originalname,
+      );
     } catch {
       originalName =
         response.Metadata.originalname;
@@ -268,6 +359,7 @@ async function getFileMetadata(objectName) {
 
 module.exports = {
   uploadBuffer,
+  downloadBuffer,
   deleteFile,
   getSignedUrl,
   getFileMetadata,

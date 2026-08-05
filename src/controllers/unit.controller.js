@@ -1,48 +1,125 @@
-const unitService = require("../services/unit.service");
+const unitService = require(
+  "../services/unit.service"
+);
 
 async function createUnit(req, res) {
   try {
-    const unit = await unitService.createUnit({ ...req.body, teacherId: req.user.id });
-    res.json({ msg: "Unit created", unit });
+    const unit =
+      await unitService.createUnit({
+        name: req.body.name,
+        teacherId: req.user.id,
+      });
+
+    res.json({
+      msg: "Unit created",
+      unit,
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error creating unit" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error creating unit",
+      });
   }
 }
 
-async function listUnitsByYear(req, res) {
+async function listUnits(
+  req,
+  res
+) {
   try {
-    const units = await unitService.listUnitsByYear(req.params.yearId);
+    const units =
+      await unitService.listUnits();
+
     res.json(units);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error listing units" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error listing units",
+      });
   }
 }
 
 async function getUnit(req, res) {
   try {
-    const unit = await unitService.getUnitWithChapters(req.params.unitId);
+    const unit =
+      await unitService
+        .getUnitWithChapters(
+          req.params.unitId
+        );
+
     res.json(unit);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error fetching unit" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error fetching unit",
+      });
   }
 }
 
-async function updateUnit(req, res) {
+async function updateUnit(
+  req,
+  res
+) {
   try {
-    const unit = await unitService.updateUnit(req.params.unitId, req.body);
-    res.json({ msg: "Unit updated", unit });
+    const unit =
+      await unitService.updateUnit(
+        req.params.unitId,
+        {
+          name: req.body.name,
+        }
+      );
+
+    res.json({
+      msg: "Unit updated",
+      unit,
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error updating unit" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error updating unit",
+      });
   }
 }
 
-async function deleteUnit(req, res) {
+async function deleteUnit(
+  req,
+  res
+) {
   try {
-    await unitService.deleteUnit(req.params.unitId);
-    res.json({ msg: "Unit deleted" });
+    await unitService.deleteUnit(
+      req.params.unitId
+    );
+
+    res.json({
+      msg: "Unit deleted",
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error deleting unit" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error deleting unit",
+      });
   }
 }
 
-module.exports = { createUnit, listUnitsByYear, getUnit, updateUnit, deleteUnit };
+module.exports = {
+  createUnit,
+  listUnits,
+  getUnit,
+  updateUnit,
+  deleteUnit,
+};

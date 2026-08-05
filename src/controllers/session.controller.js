@@ -42,9 +42,11 @@ async function listSessionsByGroup(req, res) {
 
 async function getSession(req, res) {
   try {
-    const session = await sessionService.getSessionWithDetails(
-      req.params.sessionId
-    );
+    const session =
+      await sessionService.getSessionWithDetails(
+        req.params.sessionId,
+        req.user
+      );
 
     res.json(session);
   } catch (err) {

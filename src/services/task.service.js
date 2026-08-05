@@ -61,6 +61,92 @@ function isAdminLevel(user) {
   );
 }
 
+async function createSignedFileUrl(objectKey) {
+  if (!objectKey) {
+    return null;
+  }
+
+  return storage.getSignedUrl(objectKey, 15);
+}
+
+async function addSignedSubmissionUrls(
+  submission,
+) {
+  const [
+    fileUrl,
+    correctedFileUrl,
+    files,
+    correctedFiles,
+  ] = await Promise.all([
+    createSignedFileUrl(
+      submission.fileUrl,
+    ),
+
+    createSignedFileUrl(
+      submission.correctedFileUrl,
+    ),
+
+    Promise.all(
+      (submission.files || []).map(
+        async (file) => ({
+          id: file.id,
+          originalName:
+            file.originalName,
+          contentType:
+            file.contentType,
+          size: file.size,
+          order: file.order,
+
+          uploadedAfterDeadline:
+            file.uploadedAfterDeadline,
+
+          uploadedAt:
+            file.uploadedAt,
+
+          fileUrl:
+            await createSignedFileUrl(
+              file.objectKey,
+            ),
+        }),
+      ),
+    ),
+
+    Promise.all(
+      (
+        submission.correctedFiles ||
+        []
+      ).map(
+        async (file) => ({
+          id: file.id,
+          originalName:
+            file.originalName,
+          contentType:
+            file.contentType,
+          size: file.size,
+          order: file.order,
+          uploadedAt:
+            file.uploadedAt,
+          uploadedBy:
+            file.uploadedBy || null,
+
+          fileUrl:
+            await createSignedFileUrl(
+              file.objectKey,
+            ),
+        }),
+      ),
+    ),
+  ]);
+
+  return {
+    ...submission,
+    fileUrl,
+    correctedFileUrl,
+    files,
+    correctedFiles,
+  };
+}
+
 async function assertGroupAccess(groupId, user) {
   if (!user) {
     throw {
@@ -129,6 +215,37 @@ async function assertGroupAccess(groupId, user) {
 async function listTasksForGroup(groupId, user) {
   await assertGroupAccess(groupId, user);
 
+  const include = {
+    groups: {
+      include: {
+        group: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    },
+  };
+
+  if (user?.role === "STUDENT") {
+    include.submissions = {
+      where: {
+        studentId: user.id,
+      },
+      select: {
+        id: true,
+        studentId: true,
+        grade: true,
+        comments: true,
+        fileUrl: true,
+        correctedFileUrl: true,
+        submittedAt: true,
+        gradedAt: true,
+      },
+    };
+  }
+
   return prisma.task.findMany({
     where: {
       groups: {
@@ -137,8 +254,11 @@ async function listTasksForGroup(groupId, user) {
         },
       },
     },
+
+    include,
+
     orderBy: {
-      deadline: "asc",
+      createdAt: "desc",
     },
   });
 }
@@ -157,6 +277,37 @@ async function getTaskWithSubmissions(taskId, user) {
               name: true,
             },
           },
+
+          files: {
+            orderBy: {
+              order: "asc",
+            },
+          },
+
+          correctedFiles: {
+            include: {
+              uploadedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+
+            orderBy: {
+              order: "asc",
+            },
+          },
+
+          gradedBy: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              isHeadAssistant: true,
+            },
+          },
+
           delegation: {
             include: {
               assistant: {
@@ -167,6 +318,35 @@ async function getTaskWithSubmissions(taskId, user) {
               },
             },
           },
+
+          delegationHistory: {
+            include: {
+              fromAssistant: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+
+              toAssistant: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+
+              changedBy: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+
+            orderBy: {
+              createdAt: "desc",
+            },
+          },
         },
       },
       groups: {
@@ -175,6 +355,20 @@ async function getTaskWithSubmissions(taskId, user) {
             select: {
               id: true,
               name: true,
+
+              assistantAssignments: {
+                select: {
+                  assistant: {
+                    select: {
+                      id: true,
+                      name: true,
+                      email: true,
+                      isHeadAssistant: true,
+                      permissions: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -225,23 +419,30 @@ async function getTaskWithSubmissions(taskId, user) {
           submission.studentId === user.id,
       );
     } else if (user.role === "ASSISTANT") {
-      const assignmentCount =
-        await prisma.assistantGroupAssignment.count({
-          where: {
-            assistantId: user.id,
-            groupId: {
-              in: taskGroupIds,
+        const assignmentCount =
+          await prisma.assistantGroupAssignment.count({
+            where: {
+              assistantId: user.id,
+              groupId: {
+                in: taskGroupIds,
+              },
             },
-          },
-        });
+          });
 
-      if (assignmentCount === 0) {
-        throw {
-          status: 403,
-          msg: "You are not assigned to this task's groups",
-        };
-      }
-    } else {
+        if (assignmentCount === 0) {
+          throw {
+            status: 403,
+            msg: "You are not assigned to this task's groups",
+          };
+        }
+
+        // Regular assistants only receive submissions
+        // specifically delegated to them.
+        task.submissions = task.submissions.filter(
+          (submission) =>
+            submission.delegation?.assistantId === user.id
+        );
+      } else {
       throw {
         status: 403,
         msg: "You do not have access to this task",
@@ -249,7 +450,22 @@ async function getTaskWithSubmissions(taskId, user) {
     }
   }
 
-  return task;
+  const [taskFileUrl, signedSubmissions] =
+    await Promise.all([
+      createSignedFileUrl(task.taskFileUrl),
+
+      Promise.all(
+        task.submissions.map(
+          addSignedSubmissionUrls
+        )
+      ),
+    ]);
+
+  return {
+    ...task,
+    taskFileUrl,
+    submissions: signedSubmissions,
+  };
 }
 
 module.exports = { createTask, updateTask, listTasksForGroup, getTaskWithSubmissions };

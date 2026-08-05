@@ -1,39 +1,134 @@
-const chapterService = require("../services/chapter.service");
+const chapterService = require(
+  "../services/chapter.service"
+);
 
-async function createChapter(req, res) {
+async function createChapter(
+  req,
+  res
+) {
   try {
-    const chapter = await chapterService.createChapter(req.body);
-    res.json({ msg: "Chapter created", chapter });
+    const chapter =
+      await chapterService.createChapter({
+        name: req.body.name,
+        unitId: req.body.unitId,
+      });
+
+    res.json({
+      msg: "Chapter created",
+      chapter,
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error creating chapter" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error creating chapter",
+      });
   }
 }
 
-async function getChapter(req, res) {
+async function listChapters(
+  req,
+  res
+) {
   try {
-    const chapter = await chapterService.getChapterWithTopics(req.params.chapterId);
+    const chapters =
+      await chapterService.listChapters({
+        unitId: req.query.unitId,
+      });
+
+    res.json(chapters);
+  } catch (err) {
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error listing chapters",
+      });
+  }
+}
+
+async function getChapter(
+  req,
+  res
+) {
+  try {
+    const chapter =
+      await chapterService
+        .getChapterWithTopics(
+          req.params.chapterId
+        );
+
     res.json(chapter);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error fetching chapter" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error fetching chapter",
+      });
   }
 }
 
-async function updateChapter(req, res) {
+async function updateChapter(
+  req,
+  res
+) {
   try {
-    const chapter = await chapterService.updateChapter(req.params.chapterId, req.body);
-    res.json({ msg: "Chapter updated", chapter });
+    const chapter =
+      await chapterService.updateChapter(
+        req.params.chapterId,
+        {
+          name: req.body.name,
+          unitId: req.body.unitId,
+        }
+      );
+
+    res.json({
+      msg: "Chapter updated",
+      chapter,
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error updating chapter" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error updating chapter",
+      });
   }
 }
 
-async function deleteChapter(req, res) {
+async function deleteChapter(
+  req,
+  res
+) {
   try {
-    await chapterService.deleteChapter(req.params.chapterId);
-    res.json({ msg: "Chapter deleted" });
+    await chapterService.deleteChapter(
+      req.params.chapterId
+    );
+
+    res.json({
+      msg: "Chapter deleted",
+    });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error deleting chapter" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error deleting chapter",
+      });
   }
 }
 
-module.exports = { createChapter, getChapter, updateChapter, deleteChapter };
+module.exports = {
+  createChapter,
+  listChapters,
+  getChapter,
+  updateChapter,
+  deleteChapter,
+};

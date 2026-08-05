@@ -4,6 +4,7 @@ const { notify } = require("./notification.service");
 const {
   uploadBuffer,
   deleteFile,
+  getSignedUrl,
 } = require("./storage.service");
 
 const MESSAGE_SENDER_SELECT = {
@@ -200,10 +201,22 @@ async function sendMessage({
       }
     );
 
+    let responseMessage = message;
+
+    if (message.attachmentUrl) {
+      responseMessage = {
+        ...message,
+        attachmentUrl: await getSignedUrl(
+          message.attachmentUrl,
+          15
+        ),
+      };
+    }
+
     if (io) {
       io.to(ticketId).emit(
         "new-ticket-message",
-        message
+        responseMessage
       );
     }
 
@@ -235,7 +248,7 @@ async function sendMessage({
       });
     }
 
-    return message;
+    return responseMessage;
   } catch (error) {
     if (attachmentUrl) {
       await deleteFile(attachmentUrl);

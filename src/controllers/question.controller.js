@@ -1,40 +1,284 @@
-const questionService = require("../services/question.service");
+const questionService = require(
+  "../services/question.service"
+);
 
-async function createQuestion(req, res) {
+const {
+  resolveTeacherId,
+} = require(
+  "../utils/resolveTeacher"
+);
+
+function parseTopicIds(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    typeof value === "string"
+  ) {
+    try {
+      const parsed =
+        JSON.parse(value);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error();
+      }
+
+      return parsed;
+    } catch {
+      throw {
+        status: 400,
+        msg:
+          "topicIds must be a valid JSON array",
+      };
+    }
+  }
+
+  throw {
+    status: 400,
+    msg:
+      "topicIds must be an array",
+  };
+}
+
+function parseBoolean(value) {
+  if (
+    value === true ||
+    value === "true" ||
+    value === "1"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+async function createQuestion(
+  req,
+  res
+) {
   try {
-    // multipart/form-data can't send real arrays cleanly — topicIds arrives as a JSON string.
-    const topicIds = typeof req.body.topicIds === "string" ? JSON.parse(req.body.topicIds) : req.body.topicIds;
+    const teacherId =
+      await resolveTeacherId(
+        req.user
+      );
 
-    const question = await questionService.createQuestion({
-      type: req.body.type,
-      correctAnswer: req.body.correctAnswer,
-      teacherId: req.user.id,
-      questionFile: req.files?.questionFile?.[0],
-      markschemeFile: req.files?.markschemeFile?.[0],
-      topicIds,
+    const topicIds =
+      parseTopicIds(
+        req.body.topicIds
+      );
+
+    const question =
+      await questionService.createQuestion({
+        title: req.body.title,
+        reference:
+          req.body.reference,
+        type: req.body.type,
+        points: req.body.points,
+        correctAnswer:
+          req.body.correctAnswer,
+        teacherId,
+
+        questionFile:
+          req.files?.questionFile?.[0],
+
+        markschemeFile:
+          req.files
+            ?.markschemeFile?.[0],
+
+        topicIds,
+      });
+
+    res.json({
+      msg: "Question created",
+      question,
     });
-    res.json({ msg: "Question created", question });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error creating question" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error creating question",
+      });
   }
 }
 
-async function listQuestions(req, res) {
+async function listQuestions(
+  req,
+  res
+) {
   try {
-    const questions = await questionService.listQuestionsForTeacher(req.user.id, req.query);
+    const teacherId =
+      await resolveTeacherId(
+        req.user
+      );
+
+    const questions =
+      await questionService
+        .listQuestionsForTeacher(
+          teacherId,
+          {
+            type: req.query.type,
+            unitId:
+              req.query.unitId,
+            chapterId:
+              req.query.chapterId,
+            topicId:
+              req.query.topicId,
+            search:
+              req.query.search,
+          }
+        );
+
     res.json(questions);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error listing questions" });
-  }
+      console.error(
+        "List questions error:",
+        err
+      );
+
+      res
+        .status(err.status || 500)
+        .json({
+          msg:
+            err.msg ||
+            err.message ||
+            "Error listing questions",
+        });
+    }
 }
 
-async function deleteQuestion(req, res) {
+async function getQuestion(
+  req,
+  res
+) {
   try {
-    await questionService.deleteQuestion(req.params.questionId);
-    res.json({ msg: "Question deleted" });
+    const teacherId =
+      await resolveTeacherId(
+        req.user
+      );
+
+    const question =
+      await questionService
+        .getQuestionForTeacher(
+          req.params.questionId,
+          teacherId
+        );
+
+    res.json(question);
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error deleting question" });
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error fetching question",
+      });
   }
 }
 
-module.exports = { createQuestion, listQuestions, deleteQuestion };
+async function updateQuestion(
+  req,
+  res
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user
+      );
+
+    const topicIds =
+      parseTopicIds(
+        req.body.topicIds
+      );
+
+    const question =
+      await questionService
+        .updateQuestion(
+          req.params.questionId,
+          teacherId,
+          {
+            title:
+              req.body.title,
+            reference:
+              req.body.reference,
+            type: req.body.type,
+            points:
+              req.body.points,
+            correctAnswer:
+              req.body.correctAnswer,
+            topicIds,
+
+            removeMarkscheme:
+              parseBoolean(
+                req.body
+                  .removeMarkscheme
+              ),
+
+            questionFile:
+              req.files
+                ?.questionFile?.[0],
+
+            markschemeFile:
+              req.files
+                ?.markschemeFile?.[0],
+          }
+        );
+
+    res.json({
+      msg: "Question updated",
+      question,
+    });
+  } catch (err) {
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error updating question",
+      });
+  }
+}
+
+async function deleteQuestion(
+  req,
+  res
+) {
+  try {
+    const teacherId =
+      await resolveTeacherId(
+        req.user
+      );
+
+    await questionService
+      .deleteQuestion(
+        req.params.questionId,
+        teacherId
+      );
+
+    res.json({
+      msg: "Question deleted",
+    });
+  } catch (err) {
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error deleting question",
+      });
+  }
+}
+
+module.exports = {
+  createQuestion,
+  listQuestions,
+  getQuestion,
+  updateQuestion,
+  deleteQuestion,
+};
