@@ -170,10 +170,67 @@ async function deleteCorrectedFile(
   }
 }
 
+async function reopenSubmission(
+  req,
+  res,
+) {
+  try {
+    const submission =
+      await submissionService.reopenSubmission({
+        submissionId:
+          req.params.submissionId,
+
+        reason:
+          req.body.reason,
+
+        requestedBy:
+          req.user,
+      });
+
+    return res.json({
+      msg:
+        "Submission reopened for grading.",
+      submission,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error reopening submission.",
+    );
+  }
+}
+
+async function getGradingHistory(
+  req,
+  res,
+) {
+  try {
+    const result =
+      await submissionService.getGradingHistory({
+        submissionId:
+          req.params.submissionId,
+
+        requestedBy:
+          req.user,
+      });
+
+    return res.json(result);
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error fetching grading history.",
+    );
+  }
+}
+
 module.exports = {
   submitHomework,
   getMyHomeworkSubmission,
   deleteHomeworkFile,
   gradeSubmission,
+  reopenSubmission,
+  getGradingHistory,
   deleteCorrectedFile,
 };

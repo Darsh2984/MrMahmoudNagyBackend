@@ -8,6 +8,7 @@ const submissionController =
 const {
   requireRole,
   requireAssistantPermission,
+  requireAdminLevel,
 } = require("../middleware/rbac.middleware");
 
 const {
@@ -16,7 +17,7 @@ const {
 
 const {
   correctedHomeworkUpload,
-} = require("../middleware/correctedHomeworkUpload.middleware");
+} = require("../middleware/correctedHomeworkUpload.middleware.js");
 
 router.post(
   "/task/:taskId",
@@ -44,6 +45,20 @@ router.patch(
   ),
   correctedHomeworkUpload,
   submissionController.gradeSubmission,
+);
+
+router.patch(
+  "/:submissionId/reopen",
+  requireAdminLevel,
+  submissionController.reopenSubmission,
+);
+
+router.get(
+  "/:submissionId/grading-history",
+  requireAssistantPermission(
+    "canGradeHomework",
+  ),
+  submissionController.getGradingHistory,
 );
 
 router.delete(

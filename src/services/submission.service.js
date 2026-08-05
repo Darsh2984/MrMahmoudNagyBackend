@@ -806,6 +806,134 @@ async function uploadCorrectedFiles({
   return uploadedObjects;
 }
 
+
+function normalizeOptionalText(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+
+  return normalized || null;
+}
+
+function assertCanReopenSubmission(requestedBy) {
+  if (!requestedBy) {
+    throw createServiceError(
+      401,
+      "Unauthorized",
+    );
+  }
+
+  const isTeacher =
+    requestedBy.role === "TEACHER";
+
+  const isHeadAssistant =
+    requestedBy.role === "ASSISTANT" &&
+    requestedBy.isHeadAssistant === true;
+
+  if (!isTeacher && !isHeadAssistant) {
+    throw createServiceError(
+      403,
+      "Only the Teacher or Head Assistant can reopen a graded submission.",
+    );
+  }
+}
+
+async function getGradingHistory({
+  submissionId,
+  requestedBy,
+}) {
+  if (!requestedBy) {
+    throw createServiceError(
+      401,
+      "Unauthorized",
+    );
+  }
+
+  const isTeacher =
+    requestedBy.role === "TEACHER";
+
+  const isHeadAssistant =
+    requestedBy.role === "ASSISTANT" &&
+    requestedBy.isHeadAssistant === true;
+
+  const isAssistant =
+    requestedBy.role === "ASSISTANT";
+
+  if (
+    !isTeacher &&
+    !isHeadAssistant &&
+    !isAssistant
+  ) {
+    throw createServiceError(
+      403,
+      "You are not allowed to view grading history.",
+    );
+  }
+
+  const submission =
+    await prisma.submission.findUnique({
+      where: {
+        id: submissionId,
+      },
+
+      include: {
+        delegation: {
+          select: {
+            assistantId: true,
+          },
+        },
+      },
+    });
+
+  if (!submission) {
+    throw createServiceError(
+      404,
+      "Submission not found",
+    );
+  }
+
+  if (
+    isAssistant &&
+    !isHeadAssistant &&
+    submission.delegation?.assistantId !==
+      requestedBy.id
+  ) {
+    throw createServiceError(
+      403,
+      "This submission has not been delegated to you.",
+    );
+  }
+
+  const history =
+    await prisma.homeworkGradingHistory.findMany({
+      where: {
+        submissionId,
+      },
+
+      include: {
+        changedBy: {
+          select: {
+            id: true,
+            name: true,
+            role: true,
+            isHeadAssistant: true,
+          },
+        },
+      },
+
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+  return {
+    submissionId,
+    history,
+  };
+}
+
 async function gradeSubmission({
   submissionId,
   grade,
@@ -858,6 +986,22 @@ async function gradeSubmission({
     gradedBy,
   });
 
+  const wasPreviouslyGraded =
+    submission.grade !== null;
+
+  const previousGrade =
+    submission.grade;
+
+  const previousComments =
+    submission.comments || null;
+
+  const previousGradedAt =
+    submission.gradedAt || null;
+
+  const previousGradedById =
+    submission.gradedById || null;
+
+
   const numericGrade =
     Number(grade);
 
@@ -884,9 +1028,7 @@ async function gradeSubmission({
   }
 
   const normalizedComments =
-    typeof comments === "string"
-      ? comments.trim()
-      : "";
+    normalizeOptionalText(comments);
 
   const incomingCorrectedFiles =
     Array.isArray(correctedFiles)
@@ -974,8 +1116,8 @@ async function gradeSubmission({
                 grade: numericGrade,
 
                 comments:
-                  normalizedComments ||
-                  null,
+                  normalizedComments,
+                  
 
                 gradedAt: now,
 
@@ -983,6 +1125,49 @@ async function gradeSubmission({
                   gradedBy.id,
               },
             });
+
+          await tx.homeworkGradingHistory.create({
+            data: {
+              submissionId,
+
+              action:
+                wasPreviouslyGraded
+                  ? "EDITED"
+                  : "GRADED",
+
+              previousGrade:
+                previousGrade,
+
+              newGrade:
+                numericGrade,
+
+              previousComments:
+                previousComments,
+
+              newComments:
+                normalizedComments,
+
+              previousGradedAt:
+                previousGradedAt,
+
+              newGradedAt:
+                now,
+
+              previousGradedById:
+                previousGradedById,
+
+              newGradedById:
+                gradedBy.id,
+
+              changedById:
+                gradedBy.id,
+
+              reason:
+                wasPreviouslyGraded
+                  ? "Grade or grading feedback updated."
+                  : "Submission graded.",
+            },
+          });
 
           if (
             submission.delegation &&
@@ -1132,6 +1317,259 @@ async function gradeSubmission({
   }
 }
 
+async function reopenSubmission({
+  submissionId,
+  reason,
+  requestedBy,
+}) {
+  assertCanReopenSubmission(
+    requestedBy,
+  );
+
+  const submission =
+    await prisma.submission.findUnique({
+      where: {
+        id: submissionId,
+      },
+
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        task: {
+          select: {
+            id: true,
+            title: true,
+            gradeOutOf: true,
+          },
+        },
+
+        delegation: {
+          select: {
+            id: true,
+            assistantId: true,
+            completedAt: true,
+          },
+        },
+      },
+    });
+
+  if (!submission) {
+    throw createServiceError(
+      404,
+      "Submission not found",
+    );
+  }
+
+  if (submission.grade === null) {
+    throw createServiceError(
+      409,
+      "This submission is already open for grading.",
+    );
+  }
+
+  const normalizedReason =
+    normalizeOptionalText(reason) ||
+    "Submission reopened for regrading.";
+
+  const previousGrade =
+    submission.grade;
+
+  const previousComments =
+    submission.comments || null;
+
+  const previousGradedAt =
+    submission.gradedAt || null;
+
+  const previousGradedById =
+    submission.gradedById || null;
+
+  const reopened =
+    await prisma.$transaction(
+      async (tx) => {
+        const updatedSubmission =
+          await tx.submission.update({
+            where: {
+              id: submissionId,
+            },
+
+            data: {
+              grade: null,
+              comments: null,
+              gradedAt: null,
+              gradedById: null,
+            },
+          });
+
+        await tx.homeworkGradingHistory.create({
+          data: {
+            submissionId,
+
+            action: "REOPENED",
+
+            previousGrade,
+
+            newGrade: null,
+
+            previousComments,
+
+            newComments: null,
+
+            previousGradedAt,
+
+            newGradedAt: null,
+
+            previousGradedById,
+
+            newGradedById: null,
+
+            changedById:
+              requestedBy.id,
+
+            reason:
+              normalizedReason,
+          },
+        });
+
+        if (submission.delegation) {
+          await tx.delegation.update({
+            where: {
+              id:
+                submission.delegation.id,
+            },
+
+            data: {
+              completedAt: null,
+            },
+          });
+
+          await tx
+            .submissionDelegationHistory
+            .create({
+              data: {
+                submissionId,
+
+                delegationId:
+                  submission.delegation.id,
+
+                action: "REOPENED",
+
+                fromAssistantId:
+                  submission.delegation
+                    .assistantId,
+
+                toAssistantId:
+                  submission.delegation
+                    .assistantId,
+
+                changedById:
+                  requestedBy.id,
+
+                reason:
+                  normalizedReason,
+              },
+            });
+        }
+
+        return tx.submission.findUnique({
+          where: {
+            id:
+              updatedSubmission.id,
+          },
+
+          include: {
+            student: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+
+            files: {
+              orderBy: {
+                order: "asc",
+              },
+            },
+
+            correctedFiles: {
+              include: {
+                uploadedBy: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+
+              orderBy: {
+                order: "asc",
+              },
+            },
+
+            gradedBy: {
+              select: {
+                id: true,
+                name: true,
+                role: true,
+                isHeadAssistant: true,
+              },
+            },
+
+            delegation: {
+              include: {
+                assistant: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+
+            task: {
+              select: {
+                id: true,
+                title: true,
+                deadline: true,
+                allowLateSubmission: true,
+                gradeOutOf: true,
+              },
+            },
+          },
+        });
+      },
+    );
+
+  notify({
+    userId:
+      submission.studentId,
+
+    type: "GENERAL",
+
+    title:
+      "Homework grade reopened",
+
+    body:
+      `${submission.task?.title || "Your homework"} was reopened for regrading.`,
+
+    link:
+      `/my-tasks/${submission.taskId}`,
+  }).catch((error) =>
+    console.error(
+      "notify() failed:",
+      error.message,
+    ),
+  );
+
+  return mapSubmission(
+    reopened,
+  );
+}
+
 async function deleteCorrectedFile({
   submissionId,
   correctedFileId,
@@ -1259,6 +1697,8 @@ module.exports = {
   getMyHomeworkSubmission,
   deleteHomeworkFile,
   gradeSubmission,
+  reopenSubmission,
+  getGradingHistory,
   deleteCorrectedFile,
   mapSubmission,
 };

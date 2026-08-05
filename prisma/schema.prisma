@@ -70,6 +70,13 @@ enum DelegationAction {
   REASSIGNED
   REMOVED
   COMPLETED
+  REOPENED
+}
+
+enum HomeworkGradingAction {
+  GRADED
+  EDITED
+  REOPENED
 }
 
 // ---------------- Core: Users & Org structure ----------------
@@ -159,6 +166,8 @@ model User {
   correctedHomeworkFilesUploaded CorrectedSubmissionFile[] @relation("CorrectedSubmissionFileUploadedBy")
 
   homeworkSubmissionsGraded Submission[] @relation("HomeworkGradedBy")
+
+  homeworkGradingHistoryChanges HomeworkGradingHistory[] @relation("HomeworkGradingHistoryChangedBy")
 
   delegationHistoryFrom SubmissionDelegationHistory[] @relation("DelegationHistoryFromAssistant")
 
@@ -672,6 +681,8 @@ model Submission {
 
   delegationHistory SubmissionDelegationHistory[]
 
+  gradingHistory HomeworkGradingHistory[]
+
   @@unique([taskId, studentId])
   @@index([taskId])
   @@index([studentId])
@@ -781,6 +792,37 @@ model SubmissionDelegationHistory {
   @@index([delegationId])
   @@index([fromAssistantId])
   @@index([toAssistantId])
+  @@index([changedById])
+  @@index([action])
+}
+
+model HomeworkGradingHistory {
+  id String @id @default(uuid())
+
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  action HomeworkGradingAction
+
+  previousGrade    Float?
+  newGrade         Float?
+  previousComments String?
+  newComments      String?
+
+  previousGradedAt DateTime?
+  newGradedAt      DateTime?
+
+  previousGradedById String?
+  newGradedById      String?
+
+  changedById String
+  changedBy   User   @relation("HomeworkGradingHistoryChangedBy", fields: [changedById], references: [id])
+
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([submissionId, createdAt])
   @@index([changedById])
   @@index([action])
 }
