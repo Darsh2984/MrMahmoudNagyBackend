@@ -79,6 +79,11 @@ enum HomeworkGradingAction {
   REOPENED
 }
 
+enum ResourceSourceType {
+  UPLOAD
+  R2_EXISTING
+}
+
 // ---------------- Core: Users & Org structure ----------------
 
 model User {
@@ -202,11 +207,12 @@ model Year {
 }
 
 model Group {
-  id        String   @id @default(uuid())
-  name      String
-  yearId    String
-  year      Year     @relation(fields: [yearId], references: [id])
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  name        String
+  yearId      String
+  year        Year     @relation(fields: [yearId], references: [id])
+  sessionLink String?
+  createdAt   DateTime @default(now())
 
   members              GroupMembership[]
   assistantAssignments AssistantGroupAssignment[]
@@ -326,32 +332,54 @@ model Topic {
 // App-layer validation enforces "exactly one of topicId/chapterId/unitId is set".
 
 model Material {
-  id        String   @id @default(uuid())
-  title     String
-  fileUrl   String
-  topicId   String?
-  topic     Topic?   @relation("MaterialTopic", fields: [topicId], references: [id])
+  id      String @id @default(uuid())
+  title   String
+  fileUrl String
+
+  sourceType ResourceSourceType @default(UPLOAD)
+
+  topicId String?
+
+  topic Topic? @relation("MaterialTopic", fields: [topicId], references: [id])
+
   chapterId String?
-  chapter   Chapter? @relation("MaterialChapter", fields: [chapterId], references: [id])
-  unitId    String?
-  unit      Unit?    @relation("MaterialUnit", fields: [unitId], references: [id])
+
+  chapter Chapter? @relation("MaterialChapter", fields: [chapterId], references: [id])
+
+  unitId String?
+
+  unit Unit? @relation("MaterialUnit", fields: [unitId], references: [id])
+
   teacherId String
-  teacher   User     @relation("MaterialTeacher", fields: [teacherId], references: [id])
+
+  teacher User @relation("MaterialTeacher", fields: [teacherId], references: [id])
+
   createdAt DateTime @default(now())
 }
 
 model Video {
-  id        String   @id @default(uuid())
-  title     String
-  videoUrl  String
-  topicId   String?
-  topic     Topic?   @relation("VideoTopic", fields: [topicId], references: [id])
+  id       String @id @default(uuid())
+  title    String
+  videoUrl String
+
+  sourceType ResourceSourceType @default(UPLOAD)
+
+  topicId String?
+
+  topic Topic? @relation("VideoTopic", fields: [topicId], references: [id])
+
   chapterId String?
-  chapter   Chapter? @relation("VideoChapter", fields: [chapterId], references: [id])
-  unitId    String?
-  unit      Unit?    @relation("VideoUnit", fields: [unitId], references: [id])
+
+  chapter Chapter? @relation("VideoChapter", fields: [chapterId], references: [id])
+
+  unitId String?
+
+  unit Unit? @relation("VideoUnit", fields: [unitId], references: [id])
+
   teacherId String
-  teacher   User     @relation("VideoTeacher", fields: [teacherId], references: [id])
+
+  teacher User @relation("VideoTeacher", fields: [teacherId], references: [id])
+
   createdAt DateTime @default(now())
 
   checkpoints VideoCheckpoint[]

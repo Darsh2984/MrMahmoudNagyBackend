@@ -134,6 +134,69 @@ async function updateGroup(groupId, { name }) {
   return prisma.group.update({ where: { id: groupId }, data: { name } });
 }
 
+function normalizeSessionLink(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const trimmed = String(value).trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed;
+
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw {
+      status: 400,
+      msg: "Session link must be a valid URL.",
+    };
+  }
+
+  if (
+    parsed.protocol !== "http:" &&
+    parsed.protocol !== "https:"
+  ) {
+    throw {
+      status: 400,
+      msg: "Session link must start with http:// or https://.",
+    };
+  }
+
+  return trimmed;
+}
+
+async function updateGroupSessionLink(groupId, sessionLink) {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: {
+      id: true,
+      name: true,
+      sessionLink: true,
+    },
+  });
+
+  if (!group) {
+    throw {
+      status: 404,
+      msg: "Group not found.",
+    };
+  }
+
+  const normalizedSessionLink =
+    normalizeSessionLink(sessionLink);
+
+  return prisma.group.update({
+    where: { id: groupId },
+    data: {
+      sessionLink: normalizedSessionLink,
+    },
+  });
+}
+
 async function deleteGroup(groupId) {
   const memberCount = await prisma.groupMembership.count({ where: { groupId } });
   if (memberCount > 0) {
@@ -168,4 +231,5 @@ module.exports = {
   deleteGroup,
   addStudentToGroup,
   removeStudentFromGroup,
+  updateGroupSessionLink,
 };

@@ -33,6 +33,20 @@ router.get(
   resourceController.getResourceViewerData
 );
 
+/**
+ * Create Material
+ *
+ * Normal upload:
+ * multipart/form-data
+ * sourceType = UPLOAD
+ * file = uploaded file
+ *
+ * Existing R2 object:
+ * multipart/form-data or normal body
+ * sourceType = R2_EXISTING
+ * objectKey = existing R2 key
+ * no file required
+ */
 router.post(
   "/material",
   requireAssistantPermission(
@@ -42,6 +56,18 @@ router.post(
   resourceController.createMaterial
 );
 
+/**
+ * Create Video
+ *
+ * Normal upload:
+ * sourceType = UPLOAD
+ * file = uploaded video
+ *
+ * Existing R2 object:
+ * sourceType = R2_EXISTING
+ * objectKey = existing R2 key
+ * no file required
+ */
 router.post(
   "/video",
   requireAssistantPermission(
@@ -52,9 +78,12 @@ router.post(
 );
 
 /**
- * File is optional during update.
- * Sending only title changes the title.
- * Sending title + file replaces the file.
+ * Update Material
+ *
+ * Supported:
+ * - title only
+ * - title + replacement uploaded file
+ * - title + existing R2 object key
  */
 router.patch(
   "/material/:materialId",
@@ -65,6 +94,14 @@ router.patch(
   resourceController.updateMaterial
 );
 
+/**
+ * Update Video
+ *
+ * Supported:
+ * - title only
+ * - title + replacement uploaded file
+ * - title + existing R2 object key
+ */
 router.patch(
   "/video/:videoId",
   requireAssistantPermission(
