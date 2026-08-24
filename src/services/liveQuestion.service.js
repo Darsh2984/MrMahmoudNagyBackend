@@ -9,14 +9,19 @@ function createHttpError(status, msg) {
 function isAdminLevel(user) {
   return (
     user?.role === "TEACHER" ||
-    (user?.role === "ASSISTANT" &&
-      user?.isHeadAssistant === true)
+    (
+      user?.role === "ASSISTANT" &&
+      user?.isHeadAssistant === true
+    )
   );
 }
 
 async function assertGroupAccess(groupId, user) {
   if (!user) {
-    throw createHttpError(401, "Unauthorized");
+    throw createHttpError(
+      401,
+      "Unauthorized"
+    );
   }
 
   if (isAdminLevel(user)) {
@@ -24,17 +29,18 @@ async function assertGroupAccess(groupId, user) {
   }
 
   if (user.role === "STUDENT") {
-    const membership = await prisma.groupMembership.findUnique({
-      where: {
-        groupId_studentId: {
-          groupId,
-          studentId: user.id,
+    const membership =
+      await prisma.groupMembership.findUnique({
+        where: {
+          groupId_studentId: {
+            groupId,
+            studentId: user.id,
+          },
         },
-      },
-      select: {
-        id: true,
-      },
-    });
+        select: {
+          id: true,
+        },
+      });
 
     if (!membership) {
       throw createHttpError(
@@ -76,7 +82,27 @@ async function assertGroupAccess(groupId, user) {
   );
 }
 
-/** Teacher or authorized Assistant poses a question during a live session. */
+/**
+ * Converts the stored R2 object key into a temporary
+ * signed URL that the frontend/browser can actually open.
+ */
+async function mapLiveQuestionAnswer(answer) {
+  return {
+    ...answer,
+
+    answerImageUrl: answer.answerImageUrl
+      ? await storage.getSignedUrl(
+          answer.answerImageUrl,
+          15
+        )
+      : null,
+  };
+}
+
+/**
+ * Teacher or authorized Assistant poses a question
+ * during a live session.
+ */
 async function createLiveQuestion({
   sessionId,
   prompt,
@@ -84,20 +110,31 @@ async function createLiveQuestion({
   createdBy,
 }) {
   if (!sessionId) {
-    throw createHttpError(400, "Session is required");
+    throw createHttpError(
+      400,
+      "Session is required"
+    );
   }
 
   const normalizedPrompt =
-    typeof prompt === "string" ? prompt.trim() : "";
+    typeof prompt === "string"
+      ? prompt.trim()
+      : "";
 
   if (!normalizedPrompt) {
-    throw createHttpError(400, "Question prompt is required");
+    throw createHttpError(
+      400,
+      "Question prompt is required"
+    );
   }
 
-  const numericGradeOutOf = Number(gradeOutOf);
+  const numericGradeOutOf =
+    Number(gradeOutOf);
 
   if (
-    !Number.isFinite(numericGradeOutOf) ||
+    !Number.isFinite(
+      numericGradeOutOf
+    ) ||
     numericGradeOutOf <= 0
   ) {
     throw createHttpError(
@@ -106,32 +143,42 @@ async function createLiveQuestion({
     );
   }
 
-  const session = await prisma.session.findUnique({
-    where: {
-      id: sessionId,
-    },
-    select: {
-      id: true,
-      groupId: true,
-    },
-  });
+  const session =
+    await prisma.session.findUnique({
+      where: {
+        id: sessionId,
+      },
+      select: {
+        id: true,
+        groupId: true,
+      },
+    });
 
   if (!session) {
-    throw createHttpError(404, "Session not found");
+    throw createHttpError(
+      404,
+      "Session not found"
+    );
   }
 
-  await assertGroupAccess(session.groupId, createdBy);
+  await assertGroupAccess(
+    session.groupId,
+    createdBy
+  );
 
   return prisma.liveQuestion.create({
     data: {
       sessionId,
       prompt: normalizedPrompt,
-      gradeOutOf: numericGradeOutOf,
+      gradeOutOf:
+        numericGradeOutOf,
     },
   });
 }
 
-/** Student photographs their handwritten answer and uploads it. */
+/**
+ * Student photographs/uploads their handwritten answer.
+ */
 async function submitAnswer({
   liveQuestionId,
   studentId,
@@ -144,19 +191,21 @@ async function submitAnswer({
     );
   }
 
-  const question = await prisma.liveQuestion.findUnique({
-    where: {
-      id: liveQuestionId,
-    },
-    select: {
-      id: true,
-      session: {
-        select: {
-          groupId: true,
+  const question =
+    await prisma.liveQuestion.findUnique({
+      where: {
+        id: liveQuestionId,
+      },
+      select: {
+        id: true,
+
+        session: {
+          select: {
+            groupId: true,
+          },
         },
       },
-    },
-  });
+    });
 
   if (!question) {
     throw createHttpError(
@@ -169,7 +218,9 @@ async function submitAnswer({
     await prisma.groupMembership.findUnique({
       where: {
         groupId_studentId: {
-          groupId: question.session.groupId,
+          groupId:
+            question.session.groupId,
+
           studentId,
         },
       },
@@ -205,23 +256,56 @@ async function submitAnswer({
     );
   }
 
-  const answerImageUrl = await storage.uploadBuffer(
-    file.buffer,
-    file.originalname,
-    file.mimetype,
-    "live-answers"
-  );
+  /*
+   * uploadBuffer() returns the stored R2 object key.
+   * We intentionally store that key in the database.
+   * It is signed only when returned to the frontend.
+   */
+  const answerImageUrl =
+    await storage.uploadBuffer(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      "live-answers"
+    );
 
-  return prisma.liveQuestionAnswer.create({
-    data: {
-      liveQuestionId,
-      studentId,
-      answerImageUrl,
-    },
-  });
+  const createdAnswer =
+    await prisma.liveQuestionAnswer.create({
+      data: {
+        liveQuestionId,
+        studentId,
+        answerImageUrl,
+      },
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        gradedBy: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+  /*
+   * Return a signed URL immediately as well.
+   * This keeps the API response consistent.
+   */
+  return mapLiveQuestionAnswer(
+    createdAnswer
+  );
 }
 
-/** Teacher, Head, or assigned Assistant grades the photographed answer. */
+/**
+ * Teacher, Head Assistant, or assigned Assistant
+ * grades the submitted answer.
+ */
 async function gradeAnswer({
   answerId,
   gradedBy,
@@ -232,6 +316,7 @@ async function gradeAnswer({
       where: {
         id: answerId,
       },
+
       include: {
         liveQuestion: {
           include: {
@@ -246,17 +331,26 @@ async function gradeAnswer({
     });
 
   if (!answer) {
-    throw createHttpError(404, "Answer not found");
+    throw createHttpError(
+      404,
+      "Answer not found"
+    );
   }
 
   await assertGroupAccess(
-    answer.liveQuestion.session.groupId,
+    answer.liveQuestion
+      .session.groupId,
     gradedBy
   );
 
-  const numericGrade = Number(grade);
+  const numericGrade =
+    Number(grade);
 
-  if (!Number.isFinite(numericGrade)) {
+  if (
+    !Number.isFinite(
+      numericGrade
+    )
+  ) {
     throw createHttpError(
       400,
       "Grade must be numeric"
@@ -265,7 +359,9 @@ async function gradeAnswer({
 
   if (
     numericGrade < 0 ||
-    numericGrade > answer.liveQuestion.gradeOutOf
+    numericGrade >
+      answer.liveQuestion
+        .gradeOutOf
   ) {
     throw createHttpError(
       400,
@@ -278,47 +374,97 @@ async function gradeAnswer({
       where: {
         id: answerId,
       },
+
       data: {
         grade: numericGrade,
         status: "GRADED",
-        gradedById: gradedBy.id,
-        gradedAt: new Date(),
+        gradedById:
+          gradedBy.id,
+        gradedAt:
+          new Date(),
+      },
+
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        gradedBy: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     });
 
   notify({
-    userId: answer.studentId,
-    type: "GRADE_POSTED",
-    title: "Your answer was graded",
+    userId:
+      answer.studentId,
+
+    type:
+      "GRADE_POSTED",
+
+    title:
+      "Your answer was graded",
+
     body:
       `You scored ${numericGrade}/` +
       `${answer.liveQuestion.gradeOutOf} on ` +
       `"${answer.liveQuestion.prompt}"`,
-    link: `/live-questions/${answer.liveQuestionId}`,
+
+    link:
+      `/live-questions/${answer.liveQuestionId}`,
   }).catch((err) =>
-    console.error("notify() failed:", err.message)
+    console.error(
+      "notify() failed:",
+      err.message
+    )
   );
 
-  return graded;
+  /*
+   * Keep returned answer consistent with listAnswersForQuestion().
+   */
+  return mapLiveQuestionAnswer(
+    graded
+  );
 }
 
+/**
+ * Returns answers visible to the requesting user.
+ *
+ * Teacher / Head / authorized Assistant:
+ *   all answers for the live question
+ *
+ * Student:
+ *   only their own answer
+ *
+ * Stored R2 keys are converted to signed URLs before
+ * being returned to the frontend.
+ */
 async function listAnswersForQuestion(
   liveQuestionId,
   user
 ) {
-  const question = await prisma.liveQuestion.findUnique({
-    where: {
-      id: liveQuestionId,
-    },
-    select: {
-      id: true,
-      session: {
-        select: {
-          groupId: true,
+  const question =
+    await prisma.liveQuestion.findUnique({
+      where: {
+        id: liveQuestionId,
+      },
+
+      select: {
+        id: true,
+
+        session: {
+          select: {
+            groupId: true,
+          },
         },
       },
-    },
-  });
+    });
 
   if (!question) {
     throw createHttpError(
@@ -332,31 +478,51 @@ async function listAnswersForQuestion(
     user
   );
 
-  return prisma.liveQuestionAnswer.findMany({
-    where: {
-      liveQuestionId,
-      ...(user.role === "STUDENT"
-        ? { studentId: user.id }
-        : {}),
-    },
-    include: {
-      student: {
-        select: {
-          id: true,
-          name: true,
+  const answers =
+    await prisma.liveQuestionAnswer.findMany({
+      where: {
+        liveQuestionId,
+
+        ...(user.role ===
+        "STUDENT"
+          ? {
+              studentId:
+                user.id,
+            }
+          : {}),
+      },
+
+      include: {
+        student: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        gradedBy: {
+          select: {
+            id: true,
+            name: true,
+          },
         },
       },
-      gradedBy: {
-        select: {
-          id: true,
-          name: true,
-        },
+
+      orderBy: {
+        submittedAt: "asc",
       },
-    },
-    orderBy: {
-      submittedAt: "asc",
-    },
-  });
+    });
+
+  return Promise.all(
+    answers.map(
+      mapLiveQuestionAnswer
+    )
+  );
 }
 
-module.exports = { createLiveQuestion, submitAnswer, gradeAnswer, listAnswersForQuestion };
+module.exports = {
+  createLiveQuestion,
+  submitAnswer,
+  gradeAnswer,
+  listAnswersForQuestion,
+};
