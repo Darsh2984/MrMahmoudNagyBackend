@@ -1,62 +1,108 @@
 const prisma = require("../config/prisma");
 
-/** Teacher/Head only: set a student's attendance mode (ONGROUND / ONLINE), per spec req #11. */
-async function setAttendanceMode(studentId, attendanceMode) {
-  if (!["ONGROUND", "ONLINE"].includes(attendanceMode)) {
-    throw { status: 400, msg: "attendanceMode must be ONGROUND or ONLINE" };
+/**
+ * Teacher/Head only: set a student's attendance mode
+ * (ONGROUND / ONLINE).
+ */
+async function setAttendanceMode(
+  studentId,
+  attendanceMode
+) {
+  if (
+    !["ONGROUND", "ONLINE"].includes(
+      attendanceMode
+    )
+  ) {
+    throw {
+      status: 400,
+      msg:
+        "attendanceMode must be ONGROUND or ONLINE",
+    };
   }
-  const student = await prisma.user.findUnique({ where: { id: studentId } });
-  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
+
+  const student =
+    await prisma.user.findUnique({
+      where: {
+        id: studentId,
+      },
+    });
+
+  if (!student || student.role !== "STUDENT") {
+    throw {
+      status: 404,
+      msg: "Student not found",
+    };
+  }
 
   return prisma.user.update({
-    where: { id: studentId },
-    data: { attendanceMode },
-    select: { id: true, name: true, attendanceMode: true },
-  });
-}
-
-async function getStudentProfile(studentId) {
-  const student = await prisma.user.findUnique({
     where: {
       id: studentId,
+    },
+    data: {
+      attendanceMode,
     },
     select: {
       id: true,
       name: true,
-      email: true,
-      phone: true,
-      role: true,
       attendanceMode: true,
-      accessCode: true,
-      schoolId: true,
-      school: {
-        select: {
-          id: true,
-          name: true,
-        },
+    },
+  });
+}
+
+async function getStudentProfile(studentId) {
+  const student =
+    await prisma.user.findUnique({
+      where: {
+        id: studentId,
       },
-      fatherName: true,
-      fatherPhone: true,
-      motherName: true,
-      motherPhone: true,
-      groupMemberships: {
-        include: {
-          group: {
-            select: {
-              id: true,
-              name: true,
-              year: {
-                select: {
-                  id: true,
-                  name: true,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        attendanceMode: true,
+        accessCode: true,
+
+        schoolId: true,
+        school: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        desiredYearId: true,
+        desiredYear: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+
+        fatherName: true,
+        fatherPhone: true,
+        motherName: true,
+        motherPhone: true,
+
+        groupMemberships: {
+          include: {
+            group: {
+              select: {
+                id: true,
+                name: true,
+                year: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
                 },
               },
             },
           },
         },
       },
-    },
-  });
+    });
 
   if (!student || student.role !== "STUDENT") {
     throw {
@@ -68,7 +114,9 @@ async function getStudentProfile(studentId) {
   return student;
 }
 
-/** Students not yet in any group — no parent-account creation logic anymore (access-code model instead). */
+/**
+ * Students not yet in any group.
+ */
 async function listUnassignedStudents() {
   return prisma.user.findMany({
     where: {
@@ -83,6 +131,7 @@ async function listUnassignedStudents() {
       email: true,
       phone: true,
       accessCode: true,
+
       schoolId: true,
       school: {
         select: {
@@ -90,8 +139,21 @@ async function listUnassignedStudents() {
           name: true,
         },
       },
+
+      desiredYearId: true,
+      desiredYear: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
     orderBy: [
+      {
+        desiredYear: {
+          name: "asc",
+        },
+      },
       {
         school: {
           name: "asc",
@@ -105,32 +167,115 @@ async function listUnassignedStudents() {
 }
 
 /**
- * Updates a student's own fields plus their parent contact info — the old system
- * managed a separate Parent user record here; that's gone now (access-code model),
- * so parentName/parentPhone are just plain fields on the student.
+ * Updates a student's own fields plus their
+ * parent contact information.
  */
-async function updateStudent(studentId, { name, email, studentPhone, fatherName, fatherPhone, motherName, motherPhone }) {
-  const student = await prisma.user.findUnique({ where: { id: studentId } });
-  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
+async function updateStudent(
+  studentId,
+  {
+    name,
+    email,
+    studentPhone,
+    fatherName,
+    fatherPhone,
+    motherName,
+    motherPhone,
+  }
+) {
+  const student =
+    await prisma.user.findUnique({
+      where: {
+        id: studentId,
+      },
+    });
+
+  if (!student || student.role !== "STUDENT") {
+    throw {
+      status: 404,
+      msg: "Student not found",
+    };
+  }
 
   return prisma.user.update({
-    where: { id: studentId },
+    where: {
+      id: studentId,
+    },
     data: {
-      ...(name ? { name } : {}),
-      ...(email ? { email: email.toLowerCase() } : {}),
-      ...(studentPhone !== undefined ? { phone: studentPhone || null } : {}),
-      ...(fatherName !== undefined ? { fatherName: fatherName || null } : {}),
-      ...(fatherPhone !== undefined ? { fatherPhone: fatherPhone || null } : {}),
-      ...(motherName !== undefined ? { motherName: motherName || null } : {}),
-      ...(motherPhone !== undefined ? { motherPhone: motherPhone || null } : {}),
+      ...(name
+        ? {
+            name,
+          }
+        : {}),
+
+      ...(email
+        ? {
+            email: email.toLowerCase(),
+          }
+        : {}),
+
+      ...(studentPhone !== undefined
+        ? {
+            phone: studentPhone || null,
+          }
+        : {}),
+
+      ...(fatherName !== undefined
+        ? {
+            fatherName:
+              fatherName || null,
+          }
+        : {}),
+
+      ...(fatherPhone !== undefined
+        ? {
+            fatherPhone:
+              fatherPhone || null,
+          }
+        : {}),
+
+      ...(motherName !== undefined
+        ? {
+            motherName:
+              motherName || null,
+          }
+        : {}),
+
+      ...(motherPhone !== undefined
+        ? {
+            motherPhone:
+              motherPhone || null,
+          }
+        : {}),
     },
   });
 }
 
 async function deleteStudent(studentId) {
-  const student = await prisma.user.findUnique({ where: { id: studentId } });
-  if (!student || student.role !== "STUDENT") throw { status: 404, msg: "Student not found" };
-  return prisma.user.delete({ where: { id: studentId } });
+  const student =
+    await prisma.user.findUnique({
+      where: {
+        id: studentId,
+      },
+    });
+
+  if (!student || student.role !== "STUDENT") {
+    throw {
+      status: 404,
+      msg: "Student not found",
+    };
+  }
+
+  return prisma.user.delete({
+    where: {
+      id: studentId,
+    },
+  });
 }
 
-module.exports = { setAttendanceMode, getStudentProfile, listUnassignedStudents, updateStudent, deleteStudent };
+module.exports = {
+  setAttendanceMode,
+  getStudentProfile,
+  listUnassignedStudents,
+  updateStudent,
+  deleteStudent,
+};

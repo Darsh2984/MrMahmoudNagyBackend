@@ -62,15 +62,49 @@ async function deleteGroup(req, res) {
   }
 }
 
+
 async function addStudent(req, res) {
   try {
-    const membership = await groupService.addStudentToGroup({
-      groupId: req.params.groupId,
-      studentId: req.body.studentId,
+    const studentIds = Array.isArray(
+      req.body.studentIds
+    )
+      ? req.body.studentIds
+      : null;
+
+    if (studentIds) {
+      const result =
+        await groupService.addStudentsToGroup({
+          groupId: req.params.groupId,
+          studentIds,
+        });
+
+      return res.json({
+        msg:
+          result.added === 1
+            ? "Student added to group"
+            : "Students added to group",
+        result,
+      });
+    }
+
+    const membership =
+      await groupService.addStudentToGroup({
+        groupId: req.params.groupId,
+        studentId: req.body.studentId,
+      });
+
+    return res.json({
+      msg: "Student added to group",
+      membership,
     });
-    res.json({ msg: "Student added to group", membership });
   } catch (err) {
-    res.status(err.status || 500).json({ msg: err.msg || "Error adding student to group" });
+    return res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error adding student to group",
+      });
   }
 }
 

@@ -118,6 +118,8 @@ model User {
   accessCode     String?         @unique // used by parents to look up a student read-only
   schoolId       String?
   school         School?         @relation(fields: [schoolId], references: [id])
+  desiredYearId String?
+  desiredYear   Year?           @relation("StudentDesiredYear", fields: [desiredYearId], references: [id])
 
   // Contact extras
   phone       String?
@@ -203,6 +205,9 @@ model Year {
   teacher   User     @relation("YearTeacher", fields: [teacherId], references: [id])
   zoomLinks Json? // [{ title, link }]
   groups    Group[]
+
+  desiredStudents User[] @relation("StudentDesiredYear")
+
   createdAt DateTime @default(now())
 }
 

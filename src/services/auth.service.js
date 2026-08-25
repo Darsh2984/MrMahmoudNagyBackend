@@ -87,35 +87,205 @@ function validateNewPassword(password) {
   return value;
 }
 
-async function registerStudent({ name, email, password, schoolId, attendanceMode, studentPhone, fatherName, fatherPhone, motherName, motherPhone }) {
-  const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-  if (existing) throw { status: 400, msg: "User already exists" };
+async function registerStudent({
+  name,
+  email,
+  password,
+  schoolId,
+  desiredYearId,
+  attendanceMode,
+  studentPhone,
+  fatherName,
+  fatherPhone,
+  motherName,
+  motherPhone,
+}) {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!name || !String(name).trim()) {
+    throw {
+      status: 400,
+      msg: "Enter your full name.",
+    };
+  }
+
+  if (
+    !normalizedEmail ||
+    !/^\S+@\S+\.\S+$/.test(normalizedEmail)
+  ) {
+    throw {
+      status: 400,
+      msg: "Enter a valid email address.",
+    };
+  }
+
+  if (!password || String(password).length < 6) {
+    throw {
+      status: 400,
+      msg: "Password must contain at least 6 characters.",
+    };
+  }
+
+  if (!studentPhone) {
+    throw {
+      status: 400,
+      msg: "Enter the student's phone number.",
+    };
+  }
+
+  if (!schoolId) {
+    throw {
+      status: 400,
+      msg: "Select your school.",
+    };
+  }
+
+  if (!desiredYearId) {
+    throw {
+      status: 400,
+      msg: "Select your academic year.",
+    };
+  }
+
+  const hasFather =
+    Boolean(String(fatherName || "").trim()) &&
+    Boolean(String(fatherPhone || "").trim());
+
+  const hasMother =
+    Boolean(String(motherName || "").trim()) &&
+    Boolean(String(motherPhone || "").trim());
+
+  if (!hasFather && !hasMother) {
+    throw {
+      status: 400,
+      msg: "At least one parent is required.",
+    };
+  }
+
+  const existing =
+    await prisma.user.findUnique({
+      where: {
+        email: normalizedEmail,
+      },
+    });
+
+  if (existing) {
+    throw {
+      status: 400,
+      msg: "User already exists",
+    };
+  }
+
+  const school =
+    await prisma.school.findUnique({
+      where: {
+        id: schoolId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (!school) {
+    throw {
+      status: 400,
+      msg: "Selected school does not exist.",
+    };
+  }
+
+  const desiredYear =
+    await prisma.year.findUnique({
+      where: {
+        id: desiredYearId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+  if (!desiredYear) {
+    throw {
+      status: 400,
+      msg: "Selected academic year does not exist.",
+    };
+  }
 
   let accessCode;
+
   do {
     accessCode = generateAccessCode();
-  } while (await prisma.user.findUnique({ where: { accessCode } }));
+  } while (
+    await prisma.user.findUnique({
+      where: {
+        accessCode,
+      },
+    })
+  );
 
-  const hashed = await bcrypt.hash(password, SALT_ROUNDS);
+  const hashed = await bcrypt.hash(
+    password,
+    SALT_ROUNDS
+  );
 
-  const user = await prisma.user.create({
+  return prisma.user.create({
     data: {
-      name,
-      email: email.toLowerCase(),
+      name: String(name).trim(),
+      email: normalizedEmail,
       password: hashed,
       role: "STUDENT",
-      schoolId: schoolId || null,
+
+      schoolId,
+      desiredYearId,
+
       attendanceMode: attendanceMode || null,
       phone: studentPhone || null,
-      fatherName: fatherName || null,
-      fatherPhone: fatherPhone || null,
-      motherName: motherName || null,
-      motherPhone: motherPhone || null,
+
+      fatherName: hasFather
+        ? String(fatherName).trim()
+        : null,
+
+      fatherPhone: hasFather
+        ? fatherPhone
+        : null,
+
+      motherName: hasMother
+        ? String(motherName).trim()
+        : null,
+
+      motherPhone: hasMother
+        ? motherPhone
+        : null,
+
       accessCode,
     },
+    include: {
+      desiredYear: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
   });
+}
 
-  return user;
+async function listRegistrationYears() {
+  return prisma.year.findMany({
+    select: {
+      id: true,
+      name: true,
+      teacherId: true,
+    },
+    orderBy: [
+      {
+        createdAt: "asc",
+      },
+      {
+        name: "asc",
+      },
+    ],
+  });
 }
 
 /**
@@ -581,6 +751,7 @@ async function deleteAssistant(assistantId) {
 
 module.exports = {
   registerStudent,
+  listRegistrationYears,
   createAssistant,
   promoteToHead,
   demoteFromHead,
