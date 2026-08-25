@@ -92,6 +92,7 @@ async function registerStudent({
   email,
   password,
   schoolId,
+  otherSchoolName,
   desiredYearId,
   attendanceMode,
   studentPhone,
@@ -99,8 +100,7 @@ async function registerStudent({
   fatherPhone,
   motherName,
   motherPhone,
-}) {
-  const normalizedEmail = normalizeEmail(email);
+}) {  const normalizedEmail = normalizeEmail(email);
 
   if (!name || !String(name).trim()) {
     throw {
@@ -133,10 +133,14 @@ async function registerStudent({
     };
   }
 
-  if (!schoolId) {
+  const normalizedOtherSchoolName =
+    String(otherSchoolName || "").trim();
+
+  if (!schoolId && !normalizedOtherSchoolName) {
     throw {
       status: 400,
-      msg: "Select your school.",
+      msg:
+        "Select your school or enter your school name.",
     };
   }
 
@@ -176,6 +180,9 @@ async function registerStudent({
     };
   }
 
+  let resolvedSchoolId = schoolId || null;
+
+if (schoolId) {
   const school =
     await prisma.school.findUnique({
       where: {
@@ -192,6 +199,38 @@ async function registerStudent({
       msg: "Selected school does not exist.",
     };
   }
+
+  resolvedSchoolId = school.id;
+} else {
+  const existingSchool =
+    await prisma.school.findFirst({
+      where: {
+        name: {
+          equals: normalizedOtherSchoolName,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (existingSchool) {
+    resolvedSchoolId = existingSchool.id;
+  } else {
+    const createdSchool =
+      await prisma.school.create({
+        data: {
+          name: normalizedOtherSchoolName,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+    resolvedSchoolId = createdSchool.id;
+  }
+}
 
   const desiredYear =
     await prisma.year.findUnique({
@@ -235,8 +274,9 @@ async function registerStudent({
       password: hashed,
       role: "STUDENT",
 
-      schoolId,
+      schoolId: resolvedSchoolId,
       desiredYearId,
+
 
       attendanceMode: attendanceMode || null,
       phone: studentPhone || null,
