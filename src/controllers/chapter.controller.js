@@ -2,10 +2,7 @@ const chapterService = require(
   "../services/chapter.service"
 );
 
-async function createChapter(
-  req,
-  res
-) {
+async function createChapter(req, res) {
   try {
     const chapter =
       await chapterService.createChapter({
@@ -28,10 +25,7 @@ async function createChapter(
   }
 }
 
-async function listChapters(
-  req,
-  res
-) {
+async function listChapters(req, res) {
   try {
     const chapters =
       await chapterService.listChapters({
@@ -50,14 +44,11 @@ async function listChapters(
   }
 }
 
-async function getChapter(
-  req,
-  res
-) {
+async function getChapter(req, res) {
   try {
     const chapter =
       await chapterService
-        .getChapterWithTopics(
+        .getChapterWithResources(
           req.params.chapterId
         );
 
@@ -73,10 +64,7 @@ async function getChapter(
   }
 }
 
-async function updateChapter(
-  req,
-  res
-) {
+async function updateChapter(req, res) {
   try {
     const chapter =
       await chapterService.updateChapter(
@@ -102,10 +90,7 @@ async function updateChapter(
   }
 }
 
-async function deleteChapter(
-  req,
-  res
-) {
+async function deleteChapter(req, res) {
   try {
     await chapterService.deleteChapter(
       req.params.chapterId

@@ -2,20 +2,88 @@ const resourceService = require(
   "../services/resource.service"
 );
 
+async function startDirectUpload(req, res) {
+  try {
+    const upload =
+      await resourceService.startDirectUpload({
+        kind: req.body.kind,
+        title: req.body.title,
+        chapterId: req.body.chapterId,
+        originalFilename:
+          req.body.originalFilename ||
+          req.body.fileName,
+        contentType:
+          req.body.contentType,
+        size:
+          req.body.size,
+      });
+
+    res.json({
+      msg: "Direct upload URL created",
+      upload,
+    });
+  } catch (err) {
+    console.error(
+      "startDirectUpload error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error preparing direct upload",
+      });
+  }
+}
+
+async function completeDirectUpload(req, res) {
+  try {
+    const resource =
+      await resourceService.completeDirectUpload({
+        kind: req.body.kind,
+        title: req.body.title,
+        chapterId: req.body.chapterId,
+        objectKey:
+          req.body.objectKey,
+        teacherId:
+          req.user.id,
+      });
+
+    res.status(201).json({
+      msg:
+        req.body.kind === "video"
+          ? "Video uploaded"
+          : "Material uploaded",
+      resource,
+    });
+  } catch (err) {
+    console.error(
+      "completeDirectUpload error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error completing direct upload",
+      });
+  }
+}
+
 async function createMaterial(req, res) {
   try {
     const material =
       await resourceService.createMaterial({
         title: req.body.title,
 
-        topicId:
-          req.body.topicId,
-
         chapterId:
           req.body.chapterId,
-
-        unitId:
-          req.body.unitId,
 
         sourceType:
           req.body.sourceType,
@@ -63,14 +131,8 @@ async function createVideo(req, res) {
         title:
           req.body.title,
 
-        topicId:
-          req.body.topicId,
-
         chapterId:
           req.body.chapterId,
-
-        unitId:
-          req.body.unitId,
 
         sourceType:
           req.body.sourceType,
@@ -144,10 +206,7 @@ async function getResourceViewerData(
   }
 }
 
-async function updateMaterial(
-  req,
-  res
-) {
+async function updateMaterial(req, res) {
   try {
     const material =
       await resourceService.updateMaterial({
@@ -188,10 +247,7 @@ async function updateMaterial(
   }
 }
 
-async function updateVideo(
-  req,
-  res
-) {
+async function updateVideo(req, res) {
   try {
     const video =
       await resourceService.updateVideo({
@@ -232,10 +288,7 @@ async function updateVideo(
   }
 }
 
-async function deleteMaterial(
-  req,
-  res
-) {
+async function deleteMaterial(req, res) {
   try {
     await resourceService.deleteMaterial(
       req.params.materialId
@@ -261,10 +314,7 @@ async function deleteMaterial(
   }
 }
 
-async function deleteVideo(
-  req,
-  res
-) {
+async function deleteVideo(req, res) {
   try {
     await resourceService.deleteVideo(
       req.params.videoId
@@ -291,6 +341,8 @@ async function deleteVideo(
 }
 
 module.exports = {
+  startDirectUpload,
+  completeDirectUpload,
   createMaterial,
   createVideo,
   getResourceViewerData,

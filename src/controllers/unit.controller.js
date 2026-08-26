@@ -7,6 +7,7 @@ async function createUnit(req, res) {
     const unit =
       await unitService.createUnit({
         name: req.body.name,
+        yearId: req.body.yearId,
         teacherId: req.user.id,
       });
 
@@ -25,13 +26,12 @@ async function createUnit(req, res) {
   }
 }
 
-async function listUnits(
-  req,
-  res
-) {
+async function listUnits(req, res) {
   try {
     const units =
-      await unitService.listUnits();
+      await unitService.listUnits({
+        yearId: req.query.yearId,
+      });
 
     res.json(units);
   } catch (err) {
@@ -45,13 +45,31 @@ async function listUnits(
   }
 }
 
+async function listUnitsByYear(req, res) {
+  try {
+    const units =
+      await unitService.listUnitsByYear(
+        req.params.yearId
+      );
+
+    res.json(units);
+  } catch (err) {
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          "Error listing units for year",
+      });
+  }
+}
+
 async function getUnit(req, res) {
   try {
     const unit =
-      await unitService
-        .getUnitWithChapters(
-          req.params.unitId
-        );
+      await unitService.getUnitWithChapters(
+        req.params.unitId
+      );
 
     res.json(unit);
   } catch (err) {
@@ -65,16 +83,14 @@ async function getUnit(req, res) {
   }
 }
 
-async function updateUnit(
-  req,
-  res
-) {
+async function updateUnit(req, res) {
   try {
     const unit =
       await unitService.updateUnit(
         req.params.unitId,
         {
           name: req.body.name,
+          yearId: req.body.yearId,
         }
       );
 
@@ -93,10 +109,7 @@ async function updateUnit(
   }
 }
 
-async function deleteUnit(
-  req,
-  res
-) {
+async function deleteUnit(req, res) {
   try {
     await unitService.deleteUnit(
       req.params.unitId
@@ -119,6 +132,7 @@ async function deleteUnit(
 module.exports = {
   createUnit,
   listUnits,
+  listUnitsByYear,
   getUnit,
   updateUnit,
   deleteUnit,

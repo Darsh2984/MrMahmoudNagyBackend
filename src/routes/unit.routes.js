@@ -13,8 +13,20 @@ const {
   "../middleware/rbac.middleware"
 );
 
-// Global taxonomy read.
-// Units are no longer related to Years.
+/*
+ * Year-scoped content.
+ *
+ * New content structure:
+ * Year -> Unit -> Chapter -> Resources
+ *
+ * The /year/:yearId route must stay before /:unitId.
+ */
+router.get(
+  "/year/:yearId",
+  requireAuth,
+  unitController.listUnitsByYear
+);
+
 router.get(
   "/",
   requireAuth,
@@ -27,9 +39,6 @@ router.get(
   unitController.getUnit
 );
 
-// Teacher/Head are allowed.
-// A regular Assistant requires
-// canUploadResources.
 router.post(
   "/",
   requireAssistantPermission(

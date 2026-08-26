@@ -205,7 +205,7 @@ model Year {
   teacher   User     @relation("YearTeacher", fields: [teacherId], references: [id])
   zoomLinks Json? // [{ title, link }]
   groups    Group[]
-
+  units Unit []
   desiredStudents User[] @relation("StudentDesiredYear")
 
   createdAt DateTime @default(now())
@@ -291,16 +291,23 @@ model GroupChatReadState {
 }
 
 model Unit {
-  id        String     @id @default(uuid())
+  id        String   @id @default(uuid())
   name      String
+
+  yearId    String?
+  year      Year?    @relation(fields: [yearId], references: [id])
+
   teacherId String
-  teacher   User       @relation("UnitTeacher", fields: [teacherId], references: [id])
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @default(now()) @updatedAt
+  teacher   User     @relation("UnitTeacher", fields: [teacherId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
   chapters  Chapter[]
   materials Material[] @relation("MaterialUnit")
   videos    Video[]    @relation("VideoUnit")
 
+  @@index([yearId])
   @@index([name])
   @@index([teacherId])
 }

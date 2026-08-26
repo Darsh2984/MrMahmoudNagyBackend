@@ -5,31 +5,6 @@ const RESOURCE_SOURCE_UPLOAD = "UPLOAD";
 const RESOURCE_SOURCE_R2_EXISTING =
   "R2_EXISTING";
 
-/**
- * A resource must be attached to exactly one level:
- * Unit, Chapter, or Topic.
- */
-function validateAttachmentLevel({
-  topicId,
-  chapterId,
-  unitId,
-}) {
-  const provided = [
-    topicId,
-    chapterId,
-    unitId,
-  ].filter(Boolean);
-
-  if (provided.length !== 1) {
-    throw {
-      status: 400,
-      msg:
-        "Provide exactly one of topicId, chapterId, " +
-        "or unitId — resources attach to one level only",
-    };
-  }
-}
-
 function validateTitle(title) {
   const normalizedTitle =
     typeof title === "string"
@@ -74,18 +49,102 @@ function normalizeSourceType(
     throw {
       status: 400,
       msg:
-        "Invalid resource source type. " +
-        "Use UPLOAD or R2_EXISTING",
+        "Invalid resource source type. Use UPLOAD or R2_EXISTING",
     };
   }
 
   return normalized;
 }
 
-async function findResource(
-  kind,
-  resourceId
+function normalizeOriginalFilename(
+  originalFilename,
+  kind
 ) {
+  const fallback =
+    kind === "video"
+      ? "uploaded-video.mp4"
+      : "uploaded-material";
+
+  return typeof originalFilename === "string" &&
+    originalFilename.trim()
+    ? originalFilename.trim()
+    : fallback;
+}
+
+function normalizeContentType(
+  contentType,
+  kind
+) {
+  if (
+    typeof contentType === "string" &&
+    contentType.trim()
+  ) {
+    return contentType.trim();
+  }
+
+  return kind === "video"
+    ? "video/mp4"
+    : "application/octet-stream";
+}
+
+function normalizeFileSize(size) {
+  const numericSize =
+    Number(size);
+
+  if (
+    Number.isFinite(numericSize) &&
+    numericSize > 0
+  ) {
+    return numericSize;
+  }
+
+  return null;
+}
+
+async function assertChapterExists(chapterId) {
+  if (!chapterId) {
+    throw {
+      status: 400,
+      msg: "chapterId is required",
+    };
+  }
+
+  const chapter =
+    await prisma.chapter.findUnique({
+      where: {
+        id: chapterId,
+      },
+      select: {
+        id: true,
+        name: true,
+        unitId: true,
+        unit: {
+          select: {
+            id: true,
+            name: true,
+            yearId: true,
+            year: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+  if (!chapter) {
+    throw {
+      status: 404,
+      msg: "Chapter not found",
+    };
+  }
+
+  return chapter;
+}
+
+async function findResource(kind, resourceId) {
   validateResourceKind(kind);
 
   const resource =
@@ -114,18 +173,13 @@ async function findResource(
   return resource;
 }
 
-function getObjectName(
-  kind,
-  resource
-) {
+function getObjectName(kind, resource) {
   return kind === "material"
     ? resource.fileUrl
     : resource.videoUrl;
 }
 
-function isPlatformOwnedResource(
-  resource
-) {
+function isPlatformOwnedResource(resource) {
   return (
     !resource.sourceType ||
     resource.sourceType ===
@@ -133,13 +187,6 @@ function isPlatformOwnedResource(
   );
 }
 
-/**
- * Validates and normalizes a manually entered
- * existing R2 object key.
- *
- * The object must already exist in the configured
- * R2 bucket.
- */
 async function validateExistingR2Object(
   objectKey
 ) {
@@ -157,26 +204,13 @@ async function validateExistingR2Object(
     throw {
       status: 404,
       msg:
-        "The R2 object could not be found. " +
-        "Check the object key and try again",
+        "The R2 object could not be found. Check the object key and try again",
     };
   }
 
   return normalizedObjectKey;
 }
 
-/**
- * Resolves a resource source into an R2 object key.
- *
- * UPLOAD:
- *   Uploads the supplied file and returns the newly
- *   created R2 key.
- *
- * R2_EXISTING:
- *   Validates that the manually entered R2 key
- *   already exists and returns that key without
- *   uploading anything.
- */
 async function resolveResourceObject({
   sourceType,
   file,
@@ -245,24 +279,161 @@ async function resolveResourceObject({
   };
 }
 
+async function startDirectUpload({
+  kind,
+  title,
+  chapterId,
+  originalFilename,
+  contentType,
+  size,
+}) {
+  validateResourceKind(kind);
+
+  const normalizedTitle =
+    validateTitle(title);
+
+  await assertChapterExists(chapterId);
+
+  const normalizedOriginalFilename =
+    normalizeOriginalFilename(
+      originalFilename,
+      kind
+    );
+
+  const normalizedContentType =
+    normalizeContentType(
+      contentType,
+      kind
+    );
+
+  const normalizedSize =
+    normalizeFileSize(size);
+
+  const folder =
+    kind === "video"
+      ? "videos"
+      : "materials";
+
+  const objectName =
+    storage.createObjectKey(
+      normalizedOriginalFilename,
+      folder
+    );
+
+  const signedUpload =
+    await storage.createPresignedUploadUrl({
+      objectName,
+      originalFilename:
+        normalizedOriginalFilename,
+      contentType:
+        normalizedContentType,
+      expiresInMinutes: 60,
+    });
+
+  return {
+    kind,
+    title:
+      normalizedTitle,
+    chapterId,
+    objectKey:
+      signedUpload.objectName,
+    uploadUrl:
+      signedUpload.uploadUrl,
+    expiresInSeconds:
+      signedUpload.expiresInSeconds,
+    contentType:
+      signedUpload.contentType,
+    originalFilename:
+      normalizedOriginalFilename,
+    size:
+      normalizedSize,
+    method: "PUT",
+    headers: {
+      "Content-Type":
+        signedUpload.contentType,
+    },
+  };
+}
+
+async function completeDirectUpload({
+  kind,
+  title,
+  chapterId,
+  objectKey,
+  teacherId,
+}) {
+  validateResourceKind(kind);
+
+  const normalizedTitle =
+    validateTitle(title);
+
+  await assertChapterExists(chapterId);
+
+  const normalizedObjectKey =
+    storage.normalizeObjectKey(
+      objectKey
+    );
+
+  const metadata =
+    await storage.getFileMetadata(
+      normalizedObjectKey
+    );
+
+  if (kind === "material") {
+    return prisma.material.create({
+      data: {
+        title:
+          normalizedTitle,
+
+        fileUrl:
+          normalizedObjectKey,
+
+        sourceType:
+          RESOURCE_SOURCE_UPLOAD,
+
+        chapterId,
+
+        topicId: null,
+        unitId: null,
+
+        teacherId,
+      },
+    });
+  }
+
+  return prisma.video.create({
+    data: {
+      title:
+        normalizedTitle,
+
+      videoUrl:
+        normalizedObjectKey,
+
+      sourceType:
+        RESOURCE_SOURCE_UPLOAD,
+
+      chapterId,
+
+      topicId: null,
+      unitId: null,
+
+      teacherId,
+    },
+  });
+}
+
 async function createMaterial({
   title,
-  topicId,
   chapterId,
-  unitId,
   teacherId,
   file,
   sourceType = RESOURCE_SOURCE_UPLOAD,
   objectKey,
 }) {
-  validateAttachmentLevel({
-    topicId,
-    chapterId,
-    unitId,
-  });
-
   const normalizedTitle =
     validateTitle(title);
+
+  await assertChapterExists(chapterId);
 
   const resolvedSource =
     await resolveResourceObject({
@@ -284,27 +455,15 @@ async function createMaterial({
         sourceType:
           resolvedSource.sourceType,
 
-        topicId:
-          topicId || null,
+        chapterId,
 
-        chapterId:
-          chapterId || null,
-
-        unitId:
-          unitId || null,
+        topicId: null,
+        unitId: null,
 
         teacherId,
       },
     });
   } catch (error) {
-    /*
-     * Only delete the new R2 object if our platform
-     * uploaded it.
-     *
-     * Never delete an object supplied using
-     * R2_EXISTING because the teacher manually
-     * manages that object.
-     */
     if (
       resolvedSource.uploadedByPlatform
     ) {
@@ -319,22 +478,16 @@ async function createMaterial({
 
 async function createVideo({
   title,
-  topicId,
   chapterId,
-  unitId,
   teacherId,
   file,
   sourceType = RESOURCE_SOURCE_UPLOAD,
   objectKey,
 }) {
-  validateAttachmentLevel({
-    topicId,
-    chapterId,
-    unitId,
-  });
-
   const normalizedTitle =
     validateTitle(title);
+
+  await assertChapterExists(chapterId);
 
   const resolvedSource =
     await resolveResourceObject({
@@ -356,14 +509,10 @@ async function createVideo({
         sourceType:
           resolvedSource.sourceType,
 
-        topicId:
-          topicId || null,
+        chapterId,
 
-        chapterId:
-          chapterId || null,
-
-        unitId:
-          unitId || null,
+        topicId: null,
+        unitId: null,
 
         teacherId,
       },
@@ -381,14 +530,6 @@ async function createVideo({
   }
 }
 
-/**
- * Returns resource metadata and a temporary
- * private signed URL.
- *
- * Both UPLOAD and R2_EXISTING use the same
- * viewer path because both ultimately reference
- * an object key in the configured R2 bucket.
- */
 async function getResourceViewerData({
   kind,
   resourceId,
@@ -460,28 +601,6 @@ async function getResourceViewerData({
   };
 }
 
-/**
- * Updates a material.
- *
- * Supported behaviors:
- *
- * 1. Title only:
- *    no sourceType / no file / no objectKey
- *
- * 2. Replace with uploaded file:
- *    sourceType = UPLOAD
- *    file supplied
- *
- * 3. Replace with manually managed R2 object:
- *    sourceType = R2_EXISTING
- *    objectKey supplied
- *
- * If the old object was UPLOAD-owned, it is deleted
- * after a successful replacement.
- *
- * If the old object was R2_EXISTING, it is never
- * automatically deleted.
- */
 async function updateMaterial({
   materialId,
   title,
@@ -512,10 +631,6 @@ async function updateMaterial({
   let resolvedSource = null;
 
   if (replacementRequested) {
-    /*
-     * If an uploaded file is supplied and sourceType
-     * was omitted, treat it as a normal UPLOAD.
-     */
     const requestedSourceType =
       sourceType ||
       (file
@@ -560,13 +675,6 @@ async function updateMaterial({
         },
       });
 
-    /*
-     * Delete the previous file only if:
-     *
-     * - a replacement happened
-     * - the old resource was platform-owned UPLOAD
-     * - old and new keys are different
-     */
     if (
       resolvedSource &&
       existing.fileUrl &&
@@ -583,12 +691,6 @@ async function updateMaterial({
 
     return updated;
   } catch (error) {
-    /*
-     * If DB update failed and we just uploaded a new
-     * platform-owned file, remove that new file.
-     *
-     * Do not remove R2_EXISTING objects.
-     */
     if (
       resolvedSource
         ?.uploadedByPlatform
@@ -705,22 +807,13 @@ async function updateVideo({
   }
 }
 
-async function deleteMaterial(
-  materialId
-) {
+async function deleteMaterial(materialId) {
   const material =
     await findResource(
       "material",
       materialId
     );
 
-  /*
-   * Only platform-owned uploads are physically
-   * deleted from R2.
-   *
-   * R2_EXISTING files are manually managed by the
-   * teacher and remain in R2.
-   */
   if (
     material.fileUrl &&
     isPlatformOwnedResource(
@@ -739,9 +832,7 @@ async function deleteMaterial(
   });
 }
 
-async function deleteVideo(
-  videoId
-) {
+async function deleteVideo(videoId) {
   const video =
     await findResource(
       "video",
@@ -767,6 +858,8 @@ async function deleteVideo(
 }
 
 module.exports = {
+  startDirectUpload,
+  completeDirectUpload,
   createMaterial,
   createVideo,
   getResourceViewerData,

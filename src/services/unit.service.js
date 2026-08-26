@@ -6,8 +6,98 @@ function normalizeName(name) {
     : "";
 }
 
+async function assertYearExists(yearId) {
+  if (!yearId) {
+    throw {
+      status: 400,
+      msg: "yearId is required",
+    };
+  }
+
+  const year =
+    await prisma.year.findUnique({
+      where: {
+        id: yearId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+  if (!year) {
+    throw {
+      status: 404,
+      msg: "Academic year not found",
+    };
+  }
+
+  return year;
+}
+
+async function assertUnitExists(unitId) {
+  const unit =
+    await prisma.unit.findUnique({
+      where: {
+        id: unitId,
+      },
+      select: {
+        id: true,
+        name: true,
+        yearId: true,
+      },
+    });
+
+  if (!unit) {
+    throw {
+      status: 404,
+      msg: "Unit not found",
+    };
+  }
+
+  return unit;
+}
+
+async function assertNoDuplicateUnit({
+  name,
+  yearId,
+  excludeUnitId = null,
+}) {
+  const duplicate =
+    await prisma.unit.findFirst({
+      where: {
+        yearId,
+
+        ...(excludeUnitId
+          ? {
+              id: {
+                not: excludeUnitId,
+              },
+            }
+          : {}),
+
+        name: {
+          equals: name,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+  if (duplicate) {
+    throw {
+      status: 400,
+      msg:
+        "A unit with this name already exists in this academic year",
+    };
+  }
+}
+
 async function createUnit({
   name,
+  yearId,
   teacherId,
 }) {
   const normalizedName =
@@ -27,52 +117,26 @@ async function createUnit({
     };
   }
 
-  const existing =
-    await prisma.unit.findFirst({
-      where: {
-        name: {
-          equals: normalizedName,
-          mode: "insensitive",
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
+  await assertYearExists(yearId);
 
-  if (existing) {
-    throw {
-      status: 400,
-      msg: "A unit with this name already exists",
-    };
-  }
+  await assertNoDuplicateUnit({
+    name: normalizedName,
+    yearId,
+  });
 
   return prisma.unit.create({
     data: {
       name: normalizedName,
+      yearId,
       teacherId,
     },
     include: {
-      _count: {
+      year: {
         select: {
-          chapters: true,
+          id: true,
+          name: true,
         },
       },
-    },
-  });
-}
-
-async function listUnits() {
-  return prisma.unit.findMany({
-    orderBy: [
-      {
-        name: "asc",
-      },
-      {
-        createdAt: "asc",
-      },
-    ],
-    include: {
       _count: {
         select: {
           chapters: true,
@@ -84,37 +148,112 @@ async function listUnits() {
   });
 }
 
-async function getUnitWithChapters(
-  unitId
-) {
+async function listUnits({
+  yearId,
+} = {}) {
+  if (yearId) {
+    return listUnitsByYear(yearId);
+  }
+
+  /*
+   * Kept for temporary backward compatibility.
+   * New teacher/student content pages should use
+   * /units/year/:yearId.
+   */
+  return prisma.unit.findMany({
+    orderBy: [
+      {
+        year: {
+          name: "asc",
+        },
+      },
+      {
+        name: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+    include: {
+      year: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      _count: {
+        select: {
+          chapters: true,
+          materials: true,
+          videos: true,
+        },
+      },
+    },
+  });
+}
+
+async function listUnitsByYear(yearId) {
+  await assertYearExists(yearId);
+
+  return prisma.unit.findMany({
+    where: {
+      yearId,
+    },
+    orderBy: [
+      {
+        name: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+    include: {
+      year: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      _count: {
+        select: {
+          chapters: true,
+          materials: true,
+          videos: true,
+        },
+      },
+    },
+  });
+}
+
+async function getUnitWithChapters(unitId) {
   const unit =
     await prisma.unit.findUnique({
       where: {
         id: unitId,
       },
       include: {
-        chapters: {
-          orderBy: {
-            createdAt: "asc",
+        year: {
+          select: {
+            id: true,
+            name: true,
           },
+        },
+        chapters: {
+          orderBy: [
+            {
+              name: "asc",
+            },
+            {
+              createdAt: "asc",
+            },
+          ],
           include: {
             _count: {
               select: {
-                topics: true,
                 materials: true,
                 videos: true,
               },
             },
-          },
-        },
-        materials: {
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-        videos: {
-          orderBy: {
-            createdAt: "asc",
           },
         },
       },
@@ -132,10 +271,15 @@ async function getUnitWithChapters(
 
 async function updateUnit(
   unitId,
-  { name }
+  { name, yearId }
 ) {
+  const existingUnit =
+    await assertUnitExists(unitId);
+
   const normalizedName =
-    normalizeName(name);
+    name === undefined
+      ? existingUnit.name
+      : normalizeName(name);
 
   if (!normalizedName) {
     throw {
@@ -144,45 +288,16 @@ async function updateUnit(
     };
   }
 
-  const unit =
-    await prisma.unit.findUnique({
-      where: {
-        id: unitId,
-      },
-      select: {
-        id: true,
-      },
-    });
+  const targetYearId =
+    yearId || existingUnit.yearId;
 
-  if (!unit) {
-    throw {
-      status: 404,
-      msg: "Unit not found",
-    };
-  }
+  await assertYearExists(targetYearId);
 
-  const duplicate =
-    await prisma.unit.findFirst({
-      where: {
-        id: {
-          not: unitId,
-        },
-        name: {
-          equals: normalizedName,
-          mode: "insensitive",
-        },
-      },
-      select: {
-        id: true,
-      },
-    });
-
-  if (duplicate) {
-    throw {
-      status: 400,
-      msg: "A unit with this name already exists",
-    };
-  }
+  await assertNoDuplicateUnit({
+    name: normalizedName,
+    yearId: targetYearId,
+    excludeUnitId: unitId,
+  });
 
   return prisma.unit.update({
     where: {
@@ -190,11 +305,20 @@ async function updateUnit(
     },
     data: {
       name: normalizedName,
+      yearId: targetYearId,
     },
     include: {
+      year: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
       _count: {
         select: {
           chapters: true,
+          materials: true,
+          videos: true,
         },
       },
     },
@@ -202,22 +326,7 @@ async function updateUnit(
 }
 
 async function deleteUnit(unitId) {
-  const unit =
-    await prisma.unit.findUnique({
-      where: {
-        id: unitId,
-      },
-      select: {
-        id: true,
-      },
-    });
-
-  if (!unit) {
-    throw {
-      status: 404,
-      msg: "Unit not found",
-    };
-  }
+  await assertUnitExists(unitId);
 
   const [
     chapterCount,
@@ -265,6 +374,7 @@ async function deleteUnit(unitId) {
 module.exports = {
   createUnit,
   listUnits,
+  listUnitsByYear,
   getUnitWithChapters,
   updateUnit,
   deleteUnit,

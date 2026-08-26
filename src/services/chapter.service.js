@@ -21,6 +21,13 @@ async function assertUnitExists(unitId) {
     select: {
       id: true,
       name: true,
+      yearId: true,
+      year: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
     },
   });
 
@@ -44,6 +51,19 @@ async function assertChapterExists(chapterId) {
         id: true,
         name: true,
         unitId: true,
+        unit: {
+          select: {
+            id: true,
+            name: true,
+            yearId: true,
+            year: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -127,12 +147,18 @@ async function createChapter({
         select: {
           id: true,
           name: true,
+          yearId: true,
+          year: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       },
 
       _count: {
         select: {
-          topics: true,
           materials: true,
           videos: true,
         },
@@ -171,12 +197,18 @@ async function listChapters({
         select: {
           id: true,
           name: true,
+          yearId: true,
+          year: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       },
 
       _count: {
         select: {
-          topics: true,
           materials: true,
           videos: true,
         },
@@ -185,9 +217,7 @@ async function listChapters({
   });
 }
 
-async function getChapterWithTopics(
-  chapterId
-) {
+async function getChapterWithResources(chapterId) {
   const chapter =
     await prisma.chapter.findUnique({
       where: {
@@ -199,25 +229,11 @@ async function getChapterWithTopics(
           select: {
             id: true,
             name: true,
-          },
-        },
-
-        topics: {
-          orderBy: [
-            {
-              name: "asc",
-            },
-            {
-              createdAt: "asc",
-            },
-          ],
-
-          include: {
-            _count: {
+            yearId: true,
+            year: {
               select: {
-                materials: true,
-                videos: true,
-                questionTags: true,
+                id: true,
+                name: true,
               },
             },
           },
@@ -232,6 +248,17 @@ async function getChapterWithTopics(
         videos: {
           orderBy: {
             createdAt: "asc",
+          },
+
+          include: {
+            checkpoints: true,
+          },
+        },
+
+        _count: {
+          select: {
+            materials: true,
+            videos: true,
           },
         },
       },
@@ -294,12 +321,18 @@ async function updateChapter(
         select: {
           id: true,
           name: true,
+          yearId: true,
+          year: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       },
 
       _count: {
         select: {
-          topics: true,
           materials: true,
           videos: true,
         },
@@ -308,22 +341,13 @@ async function updateChapter(
   });
 }
 
-async function deleteChapter(
-  chapterId
-) {
+async function deleteChapter(chapterId) {
   await assertChapterExists(chapterId);
 
   const [
-    topicCount,
     materialCount,
     videoCount,
   ] = await Promise.all([
-    prisma.topic.count({
-      where: {
-        chapterId,
-      },
-    }),
-
     prisma.material.count({
       where: {
         chapterId,
@@ -338,14 +362,13 @@ async function deleteChapter(
   ]);
 
   if (
-    topicCount > 0 ||
     materialCount > 0 ||
     videoCount > 0
   ) {
     throw {
       status: 400,
       msg:
-        "Cannot delete a chapter that still contains topics, materials, or videos",
+        "Cannot delete a chapter that still contains materials or videos",
     };
   }
 
@@ -359,7 +382,7 @@ async function deleteChapter(
 module.exports = {
   createChapter,
   listChapters,
-  getChapterWithTopics,
+  getChapterWithResources,
   updateChapter,
   deleteChapter,
 };

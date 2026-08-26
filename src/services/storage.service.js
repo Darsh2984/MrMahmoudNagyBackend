@@ -86,6 +86,25 @@ function normalizeExtension(originalFilename) {
     .replace(/[^a-z0-9.]/g, "");
 }
 
+function createObjectKey(
+  originalFilename,
+  folder = "misc"
+) {
+  const safeFolder =
+    normalizeFolder(folder);
+
+  const extension =
+    normalizeExtension(
+      originalFilename
+    );
+
+  return (
+    `${safeFolder}/${Date.now()}-` +
+    `${crypto.randomBytes(8).toString("hex")}` +
+    `${extension}`
+  );
+}
+
 function normalizeObjectKey(value) {
   if (
     typeof value !== "string" ||
@@ -99,32 +118,10 @@ function normalizeObjectKey(value) {
 
   let objectKey = value.trim();
 
-  /*
-   * Teachers may copy a key from Cloudflare with
-   * a leading slash. R2 keys should not start with /.
-   */
   objectKey = objectKey.replace(/^\/+/, "");
-
-  /*
-   * Convert Windows-style separators in case a path
-   * was copied from somewhere using backslashes.
-   */
   objectKey = objectKey.replace(/\\/g, "/");
-
-  /*
-   * Collapse accidental repeated slashes.
-   *
-   * Example:
-   * materials//physics///video.mp4
-   *
-   * becomes:
-   * materials/physics/video.mp4
-   */
   objectKey = objectKey.replace(/\/{2,}/g, "/");
 
-  /*
-   * Reject directory-looking values.
-   */
   if (
     !objectKey ||
     objectKey.endsWith("/")
@@ -135,13 +132,6 @@ function normalizeObjectKey(value) {
     );
   }
 
-  /*
-   * Prevent obviously malformed traversal-like keys.
-   *
-   * R2 technically allows many key formats, but we
-   * should not allow manual references such as:
-   * ../secret/file.pdf
-   */
   const segments = objectKey.split("/");
 
   if (
@@ -158,13 +148,6 @@ function normalizeObjectKey(value) {
     );
   }
 
-  /*
-   * Keep the original characters otherwise.
-   *
-   * This is important because manually uploaded R2
-   * files may contain spaces, brackets, Unicode, etc.
-   * We should not rename or mutate an existing R2 key.
-   */
   return objectKey;
 }
 
@@ -233,18 +216,11 @@ async function uploadBuffer(
     );
   }
 
-  const safeFolder =
-    normalizeFolder(folder);
-
-  const extension =
-    normalizeExtension(
-      originalFilename
-    );
-
   const objectName =
-    `${safeFolder}/${Date.now()}-` +
-    `${crypto.randomBytes(8).toString("hex")}` +
-    `${extension}`;
+    createObjectKey(
+      originalFilename,
+      folder
+    );
 
   await r2.send(
     new PutObjectCommand({
@@ -270,6 +246,64 @@ async function uploadBuffer(
   );
 
   return objectName;
+}
+
+async function createPresignedUploadUrl({
+  objectName,
+  originalFilename,
+  contentType,
+  expiresInMinutes = 60,
+}) {
+  const normalizedObjectName =
+    normalizeObjectKey(objectName);
+
+  const normalizedContentType =
+    typeof contentType === "string" &&
+    contentType.trim()
+      ? contentType.trim()
+      : "application/octet-stream";
+
+  const expiresInSeconds =
+    Math.max(
+      60,
+      Math.min(
+        Number(expiresInMinutes) || 60,
+        60
+      )
+    ) * 60;
+
+  const uploadUrl =
+    await createPresignedUrl(
+      r2,
+      new PutObjectCommand({
+        Bucket: bucketName,
+        Key: normalizedObjectName,
+        ContentType:
+          normalizedContentType,
+        CacheControl:
+          "private, max-age=0, no-transform",
+        Metadata: {
+          originalname:
+            encodeURIComponent(
+              originalFilename ||
+                "uploaded-file"
+            ),
+        },
+      }),
+      {
+        expiresIn:
+          expiresInSeconds,
+      }
+    );
+
+  return {
+    uploadUrl,
+    objectName:
+      normalizedObjectName,
+    expiresInSeconds,
+    contentType:
+      normalizedContentType,
+  };
 }
 
 async function fileExists(objectName) {
@@ -491,6 +525,8 @@ async function getFileMetadata(objectName) {
 
 module.exports = {
   uploadBuffer,
+  createObjectKey,
+  createPresignedUploadUrl,
   downloadBuffer,
   deleteFile,
   getSignedUrl,

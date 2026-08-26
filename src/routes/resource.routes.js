@@ -21,6 +21,34 @@ const {
 );
 
 /**
+ * Direct browser-to-R2 upload.
+ *
+ * 1. POST /api/resources/direct-upload/start
+ *    Backend returns a signed R2 PUT URL.
+ *
+ * 2. Browser uploads the file directly to R2.
+ *
+ * 3. POST /api/resources/direct-upload/complete
+ *    Backend verifies the object exists and saves
+ *    the Material/Video database record.
+ */
+router.post(
+  "/direct-upload/start",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.startDirectUpload
+);
+
+router.post(
+  "/direct-upload/complete",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.completeDirectUpload
+);
+
+/**
  * Viewer endpoint.
  *
  * Examples:
@@ -34,7 +62,7 @@ router.get(
 );
 
 /**
- * Create Material
+ * Legacy/small Material upload.
  *
  * Normal upload:
  * multipart/form-data
@@ -42,7 +70,6 @@ router.get(
  * file = uploaded file
  *
  * Existing R2 object:
- * multipart/form-data or normal body
  * sourceType = R2_EXISTING
  * objectKey = existing R2 key
  * no file required
@@ -57,16 +84,11 @@ router.post(
 );
 
 /**
- * Create Video
+ * Legacy/small Video upload.
  *
- * Normal upload:
- * sourceType = UPLOAD
- * file = uploaded video
- *
- * Existing R2 object:
- * sourceType = R2_EXISTING
- * objectKey = existing R2 key
- * no file required
+ * For large videos, use:
+ * /direct-upload/start
+ * /direct-upload/complete
  */
 router.post(
   "/video",
@@ -77,14 +99,6 @@ router.post(
   resourceController.createVideo
 );
 
-/**
- * Update Material
- *
- * Supported:
- * - title only
- * - title + replacement uploaded file
- * - title + existing R2 object key
- */
 router.patch(
   "/material/:materialId",
   requireAssistantPermission(
@@ -94,14 +108,6 @@ router.patch(
   resourceController.updateMaterial
 );
 
-/**
- * Update Video
- *
- * Supported:
- * - title only
- * - title + replacement uploaded file
- * - title + existing R2 object key
- */
 router.patch(
   "/video/:videoId",
   requireAssistantPermission(
