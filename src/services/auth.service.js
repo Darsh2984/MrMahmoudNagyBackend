@@ -761,7 +761,26 @@ async function getCurrentUser(userId) {
       permissions: true,
       // Only meaningful for STUDENT, but harmless/empty for other roles — this is
       // what lets the frontend gate a student with no group to a "waiting" screen.
-      groupMemberships: { select: { id: true } },
+      groupMemberships: {
+        select: {
+          id: true,
+
+          group: {
+            select: {
+              id: true,
+              name: true,
+              yearId: true,
+
+              year: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
   if (!user) throw { status: 404, msg: "User not found" };
