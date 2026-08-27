@@ -83,7 +83,11 @@ enum ResourceSourceType {
   UPLOAD
   R2_EXISTING
   GOOGLE_DRIVE_LINK
+}
 
+enum StudentSupportChatSenderType {
+  USER
+  PARENT
 }
 
 // ---------------- Core: Users & Org structure ----------------
@@ -156,6 +160,7 @@ model User {
   attendanceRecords       SessionAttendance[]
   ticketsCreated          Ticket[]             @relation("TicketCreatedBy")
   ticketCategoriesCreated TicketCategory[]     @relation("TicketCategoryCreatedBy")
+  
 
   // Relations (as assistant)
   groupAssignments      AssistantGroupAssignment[]
@@ -166,6 +171,9 @@ model User {
   ticketMessagesSent    TicketMessage[]
   groupChatMessagesSent GroupChatMessage[]
   groupChatReadStates   GroupChatReadState[]
+  studentSupportChatsAsStudent StudentSupportChat[]        @relation("StudentSupportChatStudent")
+  supportChatMessagesSent      StudentSupportChatMessage[] @relation("StudentSupportChatSender")
+  supportChatReadStates        StudentSupportChatReadState[] @relation("StudentSupportChatUserReadState")
 
   paperQuizSubmissionsGraded QuizSubmission[] @relation("PaperQuizGradedBy")
 
@@ -228,6 +236,7 @@ model Group {
   quizzes              QuizGroup[]
   chatMessages         GroupChatMessage[]
   chatReadStates       GroupChatReadState[]
+  studentSupportChats StudentSupportChat[]
 }
 
 model GroupMembership {
@@ -290,6 +299,74 @@ model GroupChatReadState {
 
   @@unique([groupId, userId])
   @@index([userId, lastReadAt])
+}
+
+model StudentSupportChat {
+  id String @id @default(uuid())
+
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  studentId String
+  student   User   @relation("StudentSupportChatStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages   StudentSupportChatMessage[]
+  readStates StudentSupportChatReadState[]
+
+  @@unique([groupId, studentId])
+  @@index([groupId])
+  @@index([studentId])
+}
+
+model StudentSupportChatMessage {
+  id String @id @default(uuid())
+
+  chatId String
+  chat   StudentSupportChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  senderType StudentSupportChatSenderType
+
+  senderUserId String?
+  senderUser   User?   @relation("StudentSupportChatSender", fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  parentDisplayName String?
+
+  messageType TicketMessageType @default(TEXT)
+
+  content String?
+
+  attachmentUrl      String?
+  attachmentName     String?
+  attachmentMimeType String?
+  attachmentSize     Int?
+  audioDuration      Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([chatId, createdAt])
+  @@index([senderUserId])
+}
+
+model StudentSupportChatReadState {
+  id String @id @default(uuid())
+
+  chatId String
+  chat   StudentSupportChat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  readerKey String
+
+  userId String?
+  user   User?   @relation("StudentSupportChatUserReadState", fields: [userId], references: [id], onDelete: Cascade)
+
+  lastReadAt DateTime @default(now())
+
+  @@unique([chatId, readerKey])
+  @@index([userId, lastReadAt])
+  @@index([readerKey, lastReadAt])
 }
 
 model Unit {

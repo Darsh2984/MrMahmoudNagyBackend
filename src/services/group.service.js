@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const studentSupportChatService = require("./studentSupportChat.service");
 
 async function createGroup({ name, yearId }) {
   const year = await prisma.year.findUnique({
@@ -401,6 +402,12 @@ async function addStudentsToGroup({
     })),
     skipDuplicates: true,
   });
+  for (const studentId of idsToCreate) {
+    await studentSupportChatService.ensureStudentSupportChat({
+      groupId,
+      studentId,
+    });
+  }
 
   return {
     added: idsToCreate.length,
