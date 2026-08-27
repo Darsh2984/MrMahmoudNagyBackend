@@ -82,6 +82,8 @@ enum HomeworkGradingAction {
 enum ResourceSourceType {
   UPLOAD
   R2_EXISTING
+  GOOGLE_DRIVE_LINK
+
 }
 
 // ---------------- Core: Users & Org structure ----------------

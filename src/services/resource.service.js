@@ -5,6 +5,9 @@ const RESOURCE_SOURCE_UPLOAD = "UPLOAD";
 const RESOURCE_SOURCE_R2_EXISTING =
   "R2_EXISTING";
 
+const RESOURCE_SOURCE_GOOGLE_DRIVE_LINK =
+  "GOOGLE_DRIVE_LINK";
+
 function validateTitle(title) {
   const normalizedTitle =
     typeof title === "string"
@@ -44,12 +47,13 @@ function normalizeSourceType(
 
   if (
     normalized !== RESOURCE_SOURCE_UPLOAD &&
-    normalized !== RESOURCE_SOURCE_R2_EXISTING
+    normalized !== RESOURCE_SOURCE_R2_EXISTING &&
+    normalized !== RESOURCE_SOURCE_GOOGLE_DRIVE_LINK
   ) {
     throw {
       status: 400,
       msg:
-        "Invalid resource source type. Use UPLOAD or R2_EXISTING",
+        "Invalid resource source type. Use UPLOAD, R2_EXISTING, or GOOGLE_DRIVE_LINK",
     };
   }
 
@@ -99,6 +103,156 @@ function normalizeFileSize(size) {
   }
 
   return null;
+}
+
+function extractGoogleDriveFileId(url) {
+  if (
+    typeof url !== "string" ||
+    !url.trim()
+  ) {
+    return null;
+  }
+
+  const value = url.trim();
+
+  const filePathMatch =
+    value.match(
+      /drive\.google\.com\/file\/d\/([^/]+)/
+    );
+
+  if (filePathMatch?.[1]) {
+    return filePathMatch[1];
+  }
+
+  const queryIdMatch =
+    value.match(/[?&]id=([^&]+)/);
+
+  if (queryIdMatch?.[1]) {
+    return queryIdMatch[1];
+  }
+
+  return null;
+}
+
+function normalizeGoogleDriveUrl(url) {
+  const fileId =
+    extractGoogleDriveFileId(url);
+
+  if (!fileId) {
+    throw {
+      status: 400,
+      msg:
+        "Enter a valid Google Drive file link. Example: https://drive.google.com/file/d/FILE_ID/view",
+    };
+  }
+
+  return `https://drive.google.com/file/d/${fileId}/preview`;
+}
+
+function isGoogleDriveSource(sourceType) {
+  return (
+    sourceType ===
+    RESOURCE_SOURCE_GOOGLE_DRIVE_LINK
+  );
+}
+
+function normalizePartCount(partCount) {
+  const numericPartCount =
+    Number(partCount);
+
+  if (
+    !Number.isInteger(numericPartCount) ||
+    numericPartCount < 1 ||
+    numericPartCount > 10000
+  ) {
+    throw {
+      status: 400,
+      msg:
+        "partCount must be an integer between 1 and 10000",
+    };
+  }
+
+  return numericPartCount;
+}
+
+function normalizePartNumber(partNumber) {
+  const numericPartNumber =
+    Number(partNumber);
+
+  if (
+    !Number.isInteger(numericPartNumber) ||
+    numericPartNumber < 1 ||
+    numericPartNumber > 10000
+  ) {
+    throw {
+      status: 400,
+      msg:
+        "partNumber must be an integer between 1 and 10000",
+    };
+  }
+
+  return numericPartNumber;
+}
+
+function normalizeParts(parts) {
+  if (!Array.isArray(parts) || !parts.length) {
+    throw {
+      status: 400,
+      msg:
+        "Uploaded multipart parts are required",
+    };
+  }
+
+  const normalizedParts = parts.map((part) => {
+    const partNumber =
+      normalizePartNumber(
+        part.partNumber ||
+          part.PartNumber
+      );
+
+    const eTag =
+      part.eTag ||
+      part.ETag;
+
+    if (
+      typeof eTag !== "string" ||
+      !eTag.trim()
+    ) {
+      throw {
+        status: 400,
+        msg:
+          `ETag is required for part ${partNumber}`,
+      };
+    }
+
+    return {
+      partNumber,
+      eTag:
+        eTag.trim(),
+    };
+  });
+
+  normalizedParts.sort(
+    (a, b) => a.partNumber - b.partNumber
+  );
+
+  const seenPartNumbers = new Set();
+
+  for (const part of normalizedParts) {
+    if (
+      seenPartNumbers.has(part.partNumber)
+    ) {
+      throw {
+        status: 400,
+        msg:
+          `Duplicate multipart part number ${part.partNumber}`,
+      };
+    }
+
+    seenPartNumbers.add(part.partNumber);
+  }
+
+  return normalizedParts;
 }
 
 async function assertChapterExists(chapterId) {
@@ -224,6 +378,26 @@ async function resolveResourceObject({
 
   if (
     normalizedSourceType ===
+    RESOURCE_SOURCE_GOOGLE_DRIVE_LINK
+  ) {
+    const driveUrl =
+      normalizeGoogleDriveUrl(
+        objectKey
+      );
+
+    return {
+      sourceType:
+        RESOURCE_SOURCE_GOOGLE_DRIVE_LINK,
+
+      objectName:
+        driveUrl,
+
+      uploadedByPlatform: false,
+    };
+  }
+
+  if (
+    normalizedSourceType ===
     RESOURCE_SOURCE_R2_EXISTING
   ) {
     if (
@@ -277,6 +451,67 @@ async function resolveResourceObject({
 
     uploadedByPlatform: true,
   };
+}
+
+async function createResourceRecord({
+  kind,
+  title,
+  chapterId,
+  teacherId,
+  objectKey,
+  sourceType = RESOURCE_SOURCE_UPLOAD,
+}) {
+  validateResourceKind(kind);
+
+  const normalizedTitle =
+    validateTitle(title);
+
+  await assertChapterExists(chapterId);
+
+  const normalizedObjectKey =
+    storage.normalizeObjectKey(
+      objectKey
+    );
+
+  if (kind === "material") {
+    return prisma.material.create({
+      data: {
+        title:
+          normalizedTitle,
+
+        fileUrl:
+          normalizedObjectKey,
+
+        sourceType,
+
+        chapterId,
+
+        topicId: null,
+        unitId: null,
+
+        teacherId,
+      },
+    });
+  }
+
+  return prisma.video.create({
+    data: {
+      title:
+        normalizedTitle,
+
+      videoUrl:
+        normalizedObjectKey,
+
+      sourceType,
+
+      chapterId,
+
+      topicId: null,
+      unitId: null,
+
+      teacherId,
+    },
+  });
 }
 
 async function startDirectUpload({
@@ -374,52 +609,190 @@ async function completeDirectUpload({
       objectKey
     );
 
-  const metadata =
-    await storage.getFileMetadata(
-      normalizedObjectKey
+  await storage.getFileMetadata(
+    normalizedObjectKey
+  );
+
+  return createResourceRecord({
+    kind,
+    title:
+      normalizedTitle,
+    chapterId,
+    objectKey:
+      normalizedObjectKey,
+    teacherId,
+    sourceType:
+      RESOURCE_SOURCE_UPLOAD,
+  });
+}
+
+async function startMultipartUpload({
+  kind,
+  title,
+  chapterId,
+  originalFilename,
+  contentType,
+  size,
+  partSize,
+  partCount,
+}) {
+  validateResourceKind(kind);
+
+  const normalizedTitle =
+    validateTitle(title);
+
+  await assertChapterExists(chapterId);
+
+  const normalizedOriginalFilename =
+    normalizeOriginalFilename(
+      originalFilename,
+      kind
     );
 
-  if (kind === "material") {
-    return prisma.material.create({
-      data: {
-        title:
-          normalizedTitle,
+  const normalizedContentType =
+    normalizeContentType(
+      contentType,
+      kind
+    );
 
-        fileUrl:
-          normalizedObjectKey,
+  const normalizedSize =
+    normalizeFileSize(size);
 
-        sourceType:
-          RESOURCE_SOURCE_UPLOAD,
+  const normalizedPartSize =
+    normalizeFileSize(partSize);
 
-        chapterId,
+  const normalizedPartCount =
+    normalizePartCount(partCount);
 
-        topicId: null,
-        unitId: null,
+  const folder =
+    kind === "video"
+      ? "videos"
+      : "materials";
 
-        teacherId,
-      },
+  const objectName =
+    storage.createObjectKey(
+      normalizedOriginalFilename,
+      folder
+    );
+
+  const multipart =
+    await storage.createMultipartUpload({
+      objectName,
+      originalFilename:
+        normalizedOriginalFilename,
+      contentType:
+        normalizedContentType,
     });
-  }
 
-  return prisma.video.create({
-    data: {
-      title:
-        normalizedTitle,
+  return {
+    kind,
+    title:
+      normalizedTitle,
+    chapterId,
+    objectKey:
+      multipart.objectName,
+    uploadId:
+      multipart.uploadId,
+    contentType:
+      multipart.contentType,
+    originalFilename:
+      normalizedOriginalFilename,
+    size:
+      normalizedSize,
+    partSize:
+      normalizedPartSize,
+    partCount:
+      normalizedPartCount,
+    method: "PUT",
+  };
+}
 
-      videoUrl:
+async function signMultipartPart({
+  objectKey,
+  uploadId,
+  partNumber,
+}) {
+  const normalizedObjectKey =
+    storage.normalizeObjectKey(
+      objectKey
+    );
+
+  const signedPart =
+    await storage.createMultipartPartUploadUrl({
+      objectName:
         normalizedObjectKey,
+      uploadId,
+      partNumber,
+      expiresInMinutes: 60,
+    });
 
-      sourceType:
-        RESOURCE_SOURCE_UPLOAD,
+  return signedPart;
+}
 
-      chapterId,
+async function completeMultipartUpload({
+  kind,
+  title,
+  chapterId,
+  objectKey,
+  uploadId,
+  parts,
+  teacherId,
+}) {
+  validateResourceKind(kind);
 
-      topicId: null,
-      unitId: null,
+  const normalizedTitle =
+    validateTitle(title);
 
-      teacherId,
-    },
+  await assertChapterExists(chapterId);
+
+  const normalizedObjectKey =
+    storage.normalizeObjectKey(
+      objectKey
+    );
+
+  const normalizedParts =
+    normalizeParts(parts);
+
+  await storage.completeMultipartUpload({
+    objectName:
+      normalizedObjectKey,
+    uploadId,
+    parts:
+      normalizedParts,
   });
+
+  await storage.getFileMetadata(
+    normalizedObjectKey
+  );
+
+  return createResourceRecord({
+    kind,
+    title:
+      normalizedTitle,
+    chapterId,
+    objectKey:
+      normalizedObjectKey,
+    teacherId,
+    sourceType:
+      RESOURCE_SOURCE_UPLOAD,
+  });
+}
+
+async function abortMultipartUpload({
+  objectKey,
+  uploadId,
+}) {
+  await storage.abortMultipartUpload({
+    objectName:
+      objectKey,
+    uploadId,
+  });
+
+  return {
+    objectKey,
+    uploadId,
+    aborted: true,
+  };
 }
 
 async function createMaterial({
@@ -553,7 +926,38 @@ async function getResourceViewerData({
         "Resource file is unavailable",
     };
   }
+  if (
+    kind === "video" &&
+    isGoogleDriveSource(resource.sourceType)
+  ) {
+    return {
+      id:
+        resource.id,
 
+      kind,
+
+      title:
+        resource.title,
+
+      sourceType:
+        RESOURCE_SOURCE_GOOGLE_DRIVE_LINK,
+
+      url:
+        objectName,
+
+      expiresInMinutes: null,
+
+      contentType:
+        "text/html",
+
+      size: null,
+
+      originalName: null,
+
+      externalProvider:
+        "google-drive",
+    };
+  }
   const [
     signedUrl,
     metadata,
@@ -860,6 +1264,10 @@ async function deleteVideo(videoId) {
 module.exports = {
   startDirectUpload,
   completeDirectUpload,
+  startMultipartUpload,
+  signMultipartPart,
+  completeMultipartUpload,
+  abortMultipartUpload,
   createMaterial,
   createVideo,
   getResourceViewerData,

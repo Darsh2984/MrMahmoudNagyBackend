@@ -76,6 +76,162 @@ async function completeDirectUpload(req, res) {
   }
 }
 
+async function startMultipartUpload(req, res) {
+  try {
+    const upload =
+      await resourceService.startMultipartUpload({
+        kind: req.body.kind,
+        title: req.body.title,
+        chapterId:
+          req.body.chapterId,
+        originalFilename:
+          req.body.originalFilename ||
+          req.body.fileName,
+        contentType:
+          req.body.contentType,
+        size:
+          req.body.size,
+        partSize:
+          req.body.partSize,
+        partCount:
+          req.body.partCount,
+      });
+
+    res.json({
+      msg:
+        "Multipart upload started",
+      upload,
+    });
+  } catch (err) {
+    console.error(
+      "startMultipartUpload error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error starting multipart upload",
+      });
+  }
+}
+
+async function signMultipartPart(req, res) {
+  try {
+    const part =
+      await resourceService.signMultipartPart({
+        objectKey:
+          req.body.objectKey,
+        uploadId:
+          req.body.uploadId,
+        partNumber:
+          req.body.partNumber,
+      });
+
+    res.json({
+      msg:
+        "Multipart part URL created",
+      part,
+    });
+  } catch (err) {
+    console.error(
+      "signMultipartPart error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error signing multipart part",
+      });
+  }
+}
+
+async function completeMultipartUpload(
+  req,
+  res
+) {
+  try {
+    const resource =
+      await resourceService.completeMultipartUpload({
+        kind:
+          req.body.kind,
+        title:
+          req.body.title,
+        chapterId:
+          req.body.chapterId,
+        objectKey:
+          req.body.objectKey,
+        uploadId:
+          req.body.uploadId,
+        parts:
+          req.body.parts,
+        teacherId:
+          req.user.id,
+      });
+
+    res.status(201).json({
+      msg:
+        req.body.kind === "video"
+          ? "Video uploaded"
+          : "Material uploaded",
+      resource,
+    });
+  } catch (err) {
+    console.error(
+      "completeMultipartUpload error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error completing multipart upload",
+      });
+  }
+}
+
+async function abortMultipartUpload(req, res) {
+  try {
+    const result =
+      await resourceService.abortMultipartUpload({
+        objectKey:
+          req.body.objectKey,
+        uploadId:
+          req.body.uploadId,
+      });
+
+    res.json({
+      msg:
+        "Multipart upload aborted",
+      result,
+    });
+  } catch (err) {
+    console.error(
+      "abortMultipartUpload error:",
+      err
+    );
+
+    res
+      .status(err.status || 500)
+      .json({
+        msg:
+          err.msg ||
+          err.message ||
+          "Error aborting multipart upload",
+      });
+  }
+}
+
 async function createMaterial(req, res) {
   try {
     const material =
@@ -138,7 +294,9 @@ async function createVideo(req, res) {
           req.body.sourceType,
 
         objectKey:
-          req.body.objectKey,
+          req.body.objectKey ||
+          req.body.driveUrl ||
+          req.body.googleDriveUrl,
 
         teacherId:
           req.user.id,
@@ -261,7 +419,9 @@ async function updateVideo(req, res) {
           req.body.sourceType,
 
         objectKey:
-          req.body.objectKey,
+          req.body.objectKey ||
+          req.body.driveUrl ||
+          req.body.googleDriveUrl,
 
         file:
           req.file,
@@ -343,6 +503,10 @@ async function deleteVideo(req, res) {
 module.exports = {
   startDirectUpload,
   completeDirectUpload,
+  startMultipartUpload,
+  signMultipartPart,
+  completeMultipartUpload,
+  abortMultipartUpload,
   createMaterial,
   createVideo,
   getResourceViewerData,

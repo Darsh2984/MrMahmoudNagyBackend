@@ -21,16 +21,60 @@ const {
 );
 
 /**
+ * Multipart browser-to-R2 upload.
+ *
+ * This is the production-safe flow for very large videos.
+ *
+ * 1. POST /api/resources/multipart/start
+ *    Creates an R2 multipart upload and returns uploadId + objectKey.
+ *
+ * 2. POST /api/resources/multipart/sign-part
+ *    Returns a signed PUT URL for one file part.
+ *
+ * 3. Browser uploads the part directly to R2.
+ *
+ * 4. POST /api/resources/multipart/complete
+ *    Completes the R2 upload and saves the DB record.
+ *
+ * 5. POST /api/resources/multipart/abort
+ *    Cancels an unfinished multipart upload.
+ */
+router.post(
+  "/multipart/start",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.startMultipartUpload
+);
+
+router.post(
+  "/multipart/sign-part",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.signMultipartPart
+);
+
+router.post(
+  "/multipart/complete",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.completeMultipartUpload
+);
+
+router.post(
+  "/multipart/abort",
+  requireAssistantPermission(
+    "canUploadResources"
+  ),
+  resourceController.abortMultipartUpload
+);
+
+/**
  * Direct browser-to-R2 upload.
  *
- * 1. POST /api/resources/direct-upload/start
- *    Backend returns a signed R2 PUT URL.
- *
- * 2. Browser uploads the file directly to R2.
- *
- * 3. POST /api/resources/direct-upload/complete
- *    Backend verifies the object exists and saves
- *    the Material/Video database record.
+ * Kept for small/medium uploads, but large videos should use multipart.
  */
 router.post(
   "/direct-upload/start",
@@ -87,8 +131,9 @@ router.post(
  * Legacy/small Video upload.
  *
  * For large videos, use:
- * /direct-upload/start
- * /direct-upload/complete
+ * /multipart/start
+ * /multipart/sign-part
+ * /multipart/complete
  */
 router.post(
   "/video",

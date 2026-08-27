@@ -7,6 +7,10 @@ const {
   DeleteObjectCommand,
   HeadObjectCommand,
   GetObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -149,6 +153,93 @@ function normalizeObjectKey(value) {
   }
 
   return objectKey;
+}
+
+function normalizeUploadId(uploadId) {
+  if (
+    typeof uploadId !== "string" ||
+    !uploadId.trim()
+  ) {
+    throw createStorageError(
+      400,
+      "Multipart uploadId is required"
+    );
+  }
+
+  return uploadId.trim();
+}
+
+function normalizePartNumber(partNumber) {
+  const numericPartNumber =
+    Number(partNumber);
+
+  if (
+    !Number.isInteger(numericPartNumber) ||
+    numericPartNumber < 1 ||
+    numericPartNumber > 10000
+  ) {
+    throw createStorageError(
+      400,
+      "Multipart partNumber must be an integer from 1 to 10000"
+    );
+  }
+
+  return numericPartNumber;
+}
+
+function normalizeMultipartParts(parts) {
+  if (!Array.isArray(parts) || !parts.length) {
+    throw createStorageError(
+      400,
+      "Multipart upload parts are required"
+    );
+  }
+
+  const normalizedParts = parts.map((part) => {
+    const partNumber =
+      normalizePartNumber(
+        part.partNumber ||
+          part.PartNumber
+      );
+
+    const eTag =
+      part.eTag ||
+      part.ETag;
+
+    if (
+      typeof eTag !== "string" ||
+      !eTag.trim()
+    ) {
+      throw createStorageError(
+        400,
+        `ETag is required for part ${partNumber}`
+      );
+    }
+
+    return {
+      PartNumber: partNumber,
+      ETag: eTag.trim(),
+    };
+  });
+
+  normalizedParts.sort(
+    (a, b) => a.PartNumber - b.PartNumber
+  );
+
+  const seen = new Set();
+
+  for (const part of normalizedParts) {
+    if (seen.has(part.PartNumber)) {
+      throw createStorageError(
+        400,
+        `Duplicate multipart part number ${part.PartNumber}`
+      );
+    }
+
+    seen.add(part.PartNumber);
+  }
+
+  return normalizedParts;
 }
 
 function getHttpStatusCode(error) {
@@ -304,6 +395,190 @@ async function createPresignedUploadUrl({
     contentType:
       normalizedContentType,
   };
+}
+
+async function createMultipartUpload({
+  objectName,
+  originalFilename,
+  contentType,
+}) {
+  const normalizedObjectName =
+    normalizeObjectKey(objectName);
+
+  const normalizedContentType =
+    typeof contentType === "string" &&
+    contentType.trim()
+      ? contentType.trim()
+      : "application/octet-stream";
+
+  const response =
+    await r2.send(
+      new CreateMultipartUploadCommand({
+        Bucket: bucketName,
+        Key: normalizedObjectName,
+        ContentType:
+          normalizedContentType,
+        CacheControl:
+          "private, max-age=0, no-transform",
+        Metadata: {
+          originalname:
+            encodeURIComponent(
+              originalFilename ||
+                "uploaded-file"
+            ),
+        },
+      })
+    );
+
+  if (!response.UploadId) {
+    throw createStorageError(
+      500,
+      "R2 did not return a multipart uploadId"
+    );
+  }
+
+  return {
+    objectName:
+      normalizedObjectName,
+    uploadId:
+      response.UploadId,
+    contentType:
+      normalizedContentType,
+  };
+}
+
+async function createMultipartPartUploadUrl({
+  objectName,
+  uploadId,
+  partNumber,
+  expiresInMinutes = 60,
+}) {
+  const normalizedObjectName =
+    normalizeObjectKey(objectName);
+
+  const normalizedUploadId =
+    normalizeUploadId(uploadId);
+
+  const normalizedPartNumber =
+    normalizePartNumber(partNumber);
+
+  const expiresInSeconds =
+    Math.max(
+      5,
+      Math.min(
+        Number(expiresInMinutes) || 60,
+        60
+      )
+    ) * 60;
+
+  const uploadUrl =
+    await createPresignedUrl(
+      r2,
+      new UploadPartCommand({
+        Bucket: bucketName,
+        Key: normalizedObjectName,
+        UploadId:
+          normalizedUploadId,
+        PartNumber:
+          normalizedPartNumber,
+      }),
+      {
+        expiresIn:
+          expiresInSeconds,
+      }
+    );
+
+  return {
+    uploadUrl,
+    objectName:
+      normalizedObjectName,
+    uploadId:
+      normalizedUploadId,
+    partNumber:
+      normalizedPartNumber,
+    expiresInSeconds,
+    method: "PUT",
+  };
+}
+
+async function completeMultipartUpload({
+  objectName,
+  uploadId,
+  parts,
+}) {
+  const normalizedObjectName =
+    normalizeObjectKey(objectName);
+
+  const normalizedUploadId =
+    normalizeUploadId(uploadId);
+
+  const normalizedParts =
+    normalizeMultipartParts(parts);
+
+  await r2.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucketName,
+      Key: normalizedObjectName,
+      UploadId:
+        normalizedUploadId,
+      MultipartUpload: {
+        Parts:
+          normalizedParts,
+      },
+    })
+  );
+
+  return {
+    objectName:
+      normalizedObjectName,
+    uploadId:
+      normalizedUploadId,
+    parts:
+      normalizedParts.map((part) => ({
+        partNumber:
+          part.PartNumber,
+        eTag:
+          part.ETag,
+      })),
+  };
+}
+
+async function abortMultipartUpload({
+  objectName,
+  uploadId,
+}) {
+  if (!objectName || !uploadId) {
+    return;
+  }
+
+  let normalizedObjectName;
+  let normalizedUploadId;
+
+  try {
+    normalizedObjectName =
+      normalizeObjectKey(objectName);
+
+    normalizedUploadId =
+      normalizeUploadId(uploadId);
+  } catch {
+    return;
+  }
+
+  try {
+    await r2.send(
+      new AbortMultipartUploadCommand({
+        Bucket: bucketName,
+        Key: normalizedObjectName,
+        UploadId:
+          normalizedUploadId,
+      })
+    );
+  } catch (error) {
+    console.error(
+      "R2 multipart abort failed:",
+      error.message
+    );
+  }
 }
 
 async function fileExists(objectName) {
@@ -527,6 +802,10 @@ module.exports = {
   uploadBuffer,
   createObjectKey,
   createPresignedUploadUrl,
+  createMultipartUpload,
+  createMultipartPartUploadUrl,
+  completeMultipartUpload,
+  abortMultipartUpload,
   downloadBuffer,
   deleteFile,
   getSignedUrl,
