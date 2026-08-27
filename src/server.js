@@ -12,6 +12,9 @@ const {
 } = require(
   "./services/groupChatAccess.service",
 );
+const studentSupportChatService = require(
+  "./services/studentSupportChat.service"
+);
 const { Server } = require("socket.io");
 
 dotenv.config();
@@ -95,47 +98,95 @@ io.use(async (socket, next) => {
       socket.handshake.auth?.token ||
       socket.handshake.headers?.authorization;
 
+    const parentAccessCode =
+      String(
+        socket.handshake.auth?.parentAccessCode ||
+          ""
+      )
+        .trim()
+        .toUpperCase();
+
     const token =
       typeof rawToken === "string" &&
       rawToken.startsWith("Bearer ")
         ? rawToken.slice(7)
         : rawToken;
 
-    if (!token) {
-      return next(
-        new Error("Authentication required")
+    if (token) {
+      const decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET
       );
+
+      const user = await prisma.user.findUnique({
+        where: {
+          id: decoded.id,
+        },
+
+        select: {
+          id: true,
+          name: true,
+          role: true,
+          isHeadAssistant: true,
+        },
+      });
+
+      if (!user) {
+        return next(
+          new Error("User not found")
+        );
+      }
+
+      socket.user = user;
+      socket.accessMode = "USER";
+
+      return next();
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
+    if (parentAccessCode) {
+      const student =
+        await prisma.user.findUnique({
+          where: {
+            accessCode: parentAccessCode,
+          },
+
+          select: {
+            id: true,
+            name: true,
+            accessCode: true,
+            fatherName: true,
+            motherName: true,
+          },
+        });
+
+      if (!student) {
+        return next(
+          new Error("Invalid parent access code")
+        );
+      }
+
+      socket.parentAccess = {
+        accessCode: parentAccessCode,
+        studentId: student.id,
+        studentName: student.name,
+        displayName: `Parent of ${student.name}`,
+      };
+
+      socket.accessMode = "PARENT";
+
+      return next();
+    }
+
+    return next(
+      new Error("Authentication required")
     );
-
-    const user = await prisma.user.findUnique({
-      where: {
-        id: decoded.id,
-      },
-
-      select: {
-        id: true,
-        name: true,
-        role: true,
-        isHeadAssistant: true,
-      },
-    });
-
-    if (!user) {
-      return next(
-        new Error("User not found")
-      );
-    }
-
-    socket.user = user;
-
-    next();
   } catch (error) {
-    next(new Error("Invalid authentication token"));
+    next(
+      new Error(
+        error.message ||
+          "Invalid socket authentication"
+      )
+    );
   }
 });
 
@@ -155,6 +206,16 @@ function getGroupIdFromChatRoom(room) {
   }
 
   return room.slice(prefix.length);
+}
+
+function getStudentSupportChatRoom(chatId) {
+  return studentSupportChatService
+    .getStudentSupportChatRoom(chatId);
+}
+
+function getChatIdFromStudentSupportChatRoom(room) {
+  return studentSupportChatService
+    .getChatIdFromStudentSupportChatRoom(room);
 }
 
 io.on("connection", (socket) => {
@@ -360,6 +421,187 @@ io.on("connection", (socket) => {
     },
   );
 
+    socket.on(
+    "join-student-support-chat",
+    async ({ chatId }, callback) => {
+      try {
+        if (!chatId) {
+          throw {
+            status: 400,
+            msg: "Chat ID is required.",
+          };
+        }
+
+        let chat = null;
+
+        if (socket.accessMode === "PARENT") {
+          chat =
+            await studentSupportChatService
+              .assertParentSupportChatAccess({
+                chatId: String(chatId),
+                accessCode:
+                  socket.parentAccess.accessCode,
+              });
+        } else {
+          chat =
+            await studentSupportChatService
+              .assertAuthenticatedSupportChatAccess(
+                String(chatId),
+                socket.user
+              );
+        }
+
+        const room =
+          getStudentSupportChatRoom(chat.id);
+
+        socket.join(room);
+
+        callback?.({
+          ok: true,
+
+          chat: {
+            id: chat.id,
+            studentId: chat.studentId,
+            groupId: chat.groupId,
+          },
+        });
+      } catch (error) {
+        callback?.({
+          ok: false,
+
+          msg:
+            error.msg ||
+            error.message ||
+            "Unable to join support chat.",
+        });
+      }
+    }
+  );
+
+  socket.on(
+    "student-support-chat-typing-start",
+    ({ chatId }) => {
+      if (!chatId) {
+        return;
+      }
+
+      const normalizedChatId =
+        String(chatId);
+
+      const room =
+        getStudentSupportChatRoom(
+          normalizedChatId
+        );
+
+      if (!socket.rooms.has(room)) {
+        return;
+      }
+
+      socket
+        .to(room)
+        .emit(
+          "student-support-chat-user-typing",
+          {
+            chatId: normalizedChatId,
+
+            user:
+              socket.accessMode === "PARENT"
+                ? null
+                : socket.user,
+
+            parent:
+              socket.accessMode === "PARENT"
+                ? socket.parentAccess
+                : null,
+
+            isTyping: true,
+          }
+        );
+    }
+  );
+
+  socket.on(
+    "student-support-chat-typing-stop",
+    ({ chatId }) => {
+      if (!chatId) {
+        return;
+      }
+
+      const normalizedChatId =
+        String(chatId);
+
+      const room =
+        getStudentSupportChatRoom(
+          normalizedChatId
+        );
+
+      if (!socket.rooms.has(room)) {
+        return;
+      }
+
+      socket
+        .to(room)
+        .emit(
+          "student-support-chat-user-typing",
+          {
+            chatId: normalizedChatId,
+
+            user:
+              socket.accessMode === "PARENT"
+                ? null
+                : socket.user,
+
+            parent:
+              socket.accessMode === "PARENT"
+                ? socket.parentAccess
+                : null,
+
+            isTyping: false,
+          }
+        );
+    }
+  );
+
+  socket.on(
+    "leave-student-support-chat",
+    ({ chatId }) => {
+      if (!chatId) {
+        return;
+      }
+
+      const normalizedChatId =
+        String(chatId);
+
+      const room =
+        getStudentSupportChatRoom(
+          normalizedChatId
+        );
+
+      socket
+        .to(room)
+        .emit(
+          "student-support-chat-user-typing",
+          {
+            chatId: normalizedChatId,
+
+            user:
+              socket.accessMode === "PARENT"
+                ? null
+                : socket.user,
+
+            parent:
+              socket.accessMode === "PARENT"
+                ? socket.parentAccess
+                : null,
+
+            isTyping: false,
+          }
+        );
+
+      socket.leave(room);
+    }
+  );
+
   socket.on(
     "ticket-typing-start",
     ({ ticketId }) => {
@@ -442,6 +684,35 @@ io.on("connection", (socket) => {
 
               isTyping: false,
             },
+          );
+
+        continue;
+      }
+            const supportChatId =
+        getChatIdFromStudentSupportChatRoom(
+          room
+        );
+
+      if (supportChatId) {
+        socket
+          .to(room)
+          .emit(
+            "student-support-chat-user-typing",
+            {
+              chatId: supportChatId,
+
+              user:
+                socket.accessMode === "PARENT"
+                  ? null
+                  : socket.user,
+
+              parent:
+                socket.accessMode === "PARENT"
+                  ? socket.parentAccess
+                  : null,
+
+              isTyping: false,
+            }
           );
 
         continue;

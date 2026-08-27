@@ -132,6 +132,7 @@ async function sendMessage({
   accessCode,
   chatId,
   content,
+  io
 }) {
   return studentSupportChatService
     .sendMessageForParent({
@@ -139,6 +140,7 @@ async function sendMessage({
         normalizeAccessCode(accessCode),
       chatId,
       content,
+      io
     });
 }
 

@@ -55,12 +55,13 @@ async function getMessages(req, res) {
 async function sendMessage(req, res) {
   try {
     const message =
-      await studentSupportChatService
-        .sendMessageForUser({
-          chatId: req.params.chatId,
-          user: req.user,
-          content: req.body.content,
-        });
+    await studentSupportChatService
+    .sendMessageForUser({
+        chatId: req.params.chatId,
+        user: req.user,
+        content: req.body.content,
+        io: req.app.get("io"),
+    });
 
     return res
       .status(201)

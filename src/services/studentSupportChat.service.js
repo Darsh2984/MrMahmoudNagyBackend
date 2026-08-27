@@ -25,6 +25,23 @@ function normalizeText(value) {
   return text || null;
 }
 
+function getStudentSupportChatRoom(chatId) {
+  return `student-support-chat:${String(chatId)}`;
+}
+
+function getChatIdFromStudentSupportChatRoom(room) {
+  const prefix = "student-support-chat:";
+
+  if (
+    typeof room !== "string" ||
+    !room.startsWith(prefix)
+  ) {
+    return null;
+  }
+
+  return room.slice(prefix.length);
+}
+
 function getParentReaderKey(studentId) {
   return `PARENT:${studentId}`;
 }
@@ -776,8 +793,9 @@ async function sendMessageForUser({
   chatId,
   user,
   content,
+  io,
 }) {
-  const chat =
+      const chat =
     await assertAuthenticatedSupportChatAccess(
       chatId,
       user
@@ -828,6 +846,17 @@ async function sendMessageForUser({
     chatId: chat.id,
     user,
   });
+    if (io) {
+    io.to(
+      getStudentSupportChatRoom(chat.id)
+    ).emit(
+      "new-student-support-chat-message",
+      {
+        chatId: chat.id,
+        message,
+      }
+    );
+  }
 
   return message;
 }
@@ -836,6 +865,7 @@ async function sendMessageForParent({
   chatId,
   accessCode,
   content,
+  io
 }) {
   const chat =
     await assertParentSupportChatAccess({
@@ -889,6 +919,17 @@ async function sendMessageForParent({
     chatId: chat.id,
     accessCode,
   });
+    if (io) {
+    io.to(
+      getStudentSupportChatRoom(chat.id)
+    ).emit(
+      "new-student-support-chat-message",
+      {
+        chatId: chat.id,
+        message,
+      }
+    );
+  }
 
   return message;
 }
@@ -987,4 +1028,8 @@ module.exports = {
   sendMessageForParent,
   markReadForUser,
   markReadForParent,
+  assertAuthenticatedSupportChatAccess,
+  assertParentSupportChatAccess,
+  getStudentSupportChatRoom,
+  getChatIdFromStudentSupportChatRoom,
 };

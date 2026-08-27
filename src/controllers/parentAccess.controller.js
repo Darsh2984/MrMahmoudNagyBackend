@@ -78,11 +78,12 @@ async function getMessages(req, res) {
 async function sendMessage(req, res) {
   try {
     const message =
-      await parentAccessService.sendMessage({
+    await parentAccessService.sendMessage({
         accessCode: getAccessCode(req),
         chatId: req.params.chatId,
         content: req.body.content,
-      });
+        io: req.app.get("io"),
+    });
 
     return res
       .status(201)
