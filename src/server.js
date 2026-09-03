@@ -50,6 +50,7 @@ const dashboardSummaryRoutes = require("./routes/dashboardSummary.routes");
 const groupChatRoutes = require("./routes/groupChat.routes");
 const studentSupportChatRoutes = require("./routes/studentSupportChat.routes");
 const parentAccessRoutes = require("./routes/parentAccess.routes");
+const aiCorrectionRoutes = require("./routes/aiCorrection.routes");
 
 const app = express();
 const server = http.createServer(app);
@@ -90,6 +91,7 @@ app.use("/api/dashboard", dashboardSummaryRoutes);
 app.use("/api/group-chat",groupChatRoutes,);
 app.use("/api/student-support-chat",studentSupportChatRoutes);
 app.use("/api/parent-access",parentAccessRoutes);
+app.use("/api/ai-correction", aiCorrectionRoutes);
 // Additional route modules get mounted here as each phase is built, see PROJECT_SPEC.md.
 
 io.use(async (socket, next) => {

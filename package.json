@@ -18,6 +18,7 @@
     "@aws-sdk/client-s3": "^3.1090.0",
     "@aws-sdk/s3-request-presigner": "^3.1090.0",
     "@google-cloud/storage": "^7.7.0",
+    "@google/genai": "^2.21.0",
     "@prisma/client": "5.19.0",
     "axios": "^1.18.1",
     "bcryptjs": "^3.0.2",
