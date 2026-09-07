@@ -789,12 +789,29 @@ async function getCurrentUser(userId) {
 
 async function listAssistants() {
   return prisma.user.findMany({
-    where: { role: "ASSISTANT" },
-    select: { id: true, name: true, email: true, isHeadAssistant: true, managedByHeadId: true, permissions: true },
-    orderBy: { name: "asc" },
+    where: {
+      role: "ASSISTANT",
+      NOT: {
+        email: {
+          startsWith: "deleted_",
+        },
+      },
+    },
+
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      isHeadAssistant: true,
+      managedByHeadId: true,
+      permissions: true,
+    },
+
+    orderBy: {
+      name: "asc",
+    },
   });
 }
-
 /** Teacher/Head can set permission flags for a regular assistant. Heads are always fully permitted (see rbac.middleware), so this is a no-op for them in practice — kept simple by allowing it anyway rather than special-casing. */
 async function updateAssistantPermissions(assistantId, permissions) {
   const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
@@ -803,9 +820,187 @@ async function updateAssistantPermissions(assistantId, permissions) {
 }
 
 async function deleteAssistant(assistantId) {
-  const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
-  if (!assistant || assistant.role !== "ASSISTANT") throw { status: 404, msg: "Assistant not found" };
-  return prisma.user.delete({ where: { id: assistantId } });
+  const assistant = await prisma.user.findUnique({
+    where: {
+      id: assistantId,
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isHeadAssistant: true,
+    },
+  });
+
+  if (!assistant || assistant.role !== "ASSISTANT") {
+    throw {
+      status: 404,
+      msg: "Assistant not found",
+    };
+  }
+
+  /*
+   * We should not hard-delete assistants who already have historical activity.
+   * Their id may be referenced by tickets, messages, grading, delegation,
+   * submissions, chat messages, and audit/history records.
+   *
+   * So this function first removes live assignments. Then:
+   * - if the assistant has no historical references, hard-delete.
+   * - if the assistant has historical references, soft-remove from active use.
+   */
+
+  const [
+    delegationCount,
+    delegationAssignedByCount,
+    ticketMessageCount,
+    groupChatMessageCount,
+    gradedSubmissionCount,
+    gradedQuizCount,
+    gradingHistoryCount,
+    delegationHistoryChangedCount,
+    delegationHistoryFromCount,
+    delegationHistoryToCount,
+  ] = await Promise.all([
+    prisma.delegation.count({
+      where: {
+        assistantId,
+      },
+    }),
+
+    prisma.delegation.count({
+      where: {
+        delegatedById: assistantId,
+      },
+    }),
+
+    prisma.ticketMessage.count({
+      where: {
+        senderId: assistantId,
+      },
+    }),
+
+    prisma.groupChatMessage.count({
+      where: {
+        senderId: assistantId,
+      },
+    }),
+
+    prisma.submission.count({
+      where: {
+        gradedById: assistantId,
+      },
+    }),
+
+    prisma.quizSubmission.count({
+      where: {
+        gradedById: assistantId,
+      },
+    }),
+
+    prisma.homeworkGradingHistory.count({
+      where: {
+        changedById: assistantId,
+      },
+    }),
+
+    prisma.submissionDelegationHistory.count({
+      where: {
+        changedById: assistantId,
+      },
+    }),
+
+    prisma.submissionDelegationHistory.count({
+      where: {
+        fromAssistantId: assistantId,
+      },
+    }),
+
+    prisma.submissionDelegationHistory.count({
+      where: {
+        toAssistantId: assistantId,
+      },
+    }),
+  ]);
+
+  const hasHistoricalActivity =
+    delegationCount > 0 ||
+    delegationAssignedByCount > 0 ||
+    ticketMessageCount > 0 ||
+    groupChatMessageCount > 0 ||
+    gradedSubmissionCount > 0 ||
+    gradedQuizCount > 0 ||
+    gradingHistoryCount > 0 ||
+    delegationHistoryChangedCount > 0 ||
+    delegationHistoryFromCount > 0 ||
+    delegationHistoryToCount > 0;
+
+  return prisma.$transaction(async (tx) => {
+    /*
+     * Remove live group assignments.
+     */
+    await tx.assistantGroupAssignment.deleteMany({
+      where: {
+        assistantId,
+      },
+    });
+
+    /*
+     * Unassign open/old tickets from this assistant.
+     */
+    await tx.ticket.updateMany({
+      where: {
+        assignedAssistantId: assistantId,
+      },
+      data: {
+        assignedAssistantId: null,
+      },
+    });
+
+    /*
+     * If this assistant was a head assistant managing other assistants,
+     * detach those assistants from this head.
+     */
+    await tx.user.updateMany({
+      where: {
+        managedByHeadId: assistantId,
+      },
+      data: {
+        managedByHeadId: null,
+      },
+    });
+
+    if (!hasHistoricalActivity) {
+      return tx.user.delete({
+        where: {
+          id: assistantId,
+        },
+      });
+    }
+
+    /*
+     * Soft-remove the assistant from active use.
+     * This keeps historical records valid while preventing normal login.
+     */
+    const deletedEmail = `deleted_${assistantId}_${assistant.email}`;
+
+    return tx.user.update({
+      where: {
+        id: assistantId,
+      },
+      data: {
+        name: `${assistant.name} (Removed)`,
+        email: deletedEmail.slice(0, 190),
+        password: null,
+        isHeadAssistant: false,
+        managedByHeadId: null,
+        permissions: {
+          removed: true,
+          removedAt: new Date().toISOString(),
+        },
+      },
+    });
+  });
 }
 
 module.exports = {

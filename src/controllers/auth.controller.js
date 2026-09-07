@@ -265,16 +265,27 @@ async function deleteAssistant(req, res) {
       msg: "Assistant deleted",
     });
   } catch (err) {
+    console.error(
+      "DELETE ASSISTANT ERROR:",
+      {
+        assistantId: req.params.assistantId,
+        code: err.code,
+        meta: err.meta,
+        message: err.message,
+        stack: err.stack,
+      }
+    );
+
     res
       .status(err.status || 500)
       .json({
         msg:
           err.msg ||
+          err.message ||
           "Error deleting assistant",
       });
   }
 }
-
 module.exports = {
   registerStudent,
   listRegistrationYears,
