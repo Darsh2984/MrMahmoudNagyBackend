@@ -6,6 +6,15 @@ async function createLiveQuestion(req, res) {
       sessionId: req.body.sessionId,
       prompt: req.body.prompt,
       gradeOutOf: req.body.gradeOutOf,
+      type: req.body.type,
+      options: {
+        A: req.body.optionA,
+        B: req.body.optionB,
+        C: req.body.optionC,
+        D: req.body.optionD,
+      },
+      correctAnswer: req.body.correctAnswer,
+      questionImage: req.file,
       createdBy: req.user,
     });
 
@@ -22,6 +31,7 @@ async function submitAnswer(req, res) {
       liveQuestionId: req.params.liveQuestionId,
       studentId: req.user.id,
       file: req.file,
+      selectedOption: req.body.selectedOption,
     });
     res.json({ msg: "Answer submitted", answer });
   } catch (err) {

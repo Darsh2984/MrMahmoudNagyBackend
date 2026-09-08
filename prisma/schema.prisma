@@ -776,6 +776,13 @@ model LiveQuestion {
   session    Session  @relation(fields: [sessionId], references: [id])
   prompt     String // question text or reference
   gradeOutOf Float
+  type       String   @default("WRITTEN")
+  questionImageUrl String?
+  optionA    String?
+  optionB    String?
+  optionC    String?
+  optionD    String?
+  correctAnswer String?
   createdAt  DateTime @default(now())
 
   answers LiveQuestionAnswer[]
@@ -787,7 +794,8 @@ model LiveQuestionAnswer {
   liveQuestion   LiveQuestion  @relation(fields: [liveQuestionId], references: [id])
   studentId      String
   student        User          @relation("StudentLiveAnswers", fields: [studentId], references: [id])
-  answerImageUrl String
+  answerImageUrl String?
+  selectedOption String?
   grade          Float?
   status         GradingStatus @default(PENDING)
   gradedById     String?

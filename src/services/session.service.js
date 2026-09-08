@@ -206,6 +206,13 @@ async function signLiveQuestionAnswers(
 
         return {
           ...question,
+          questionImageUrl:
+            question.questionImageUrl
+              ? await storage.getSignedUrl(
+                  question.questionImageUrl,
+                  15
+                )
+              : null,
           answers:
             signedAnswers,
         };
@@ -449,6 +456,7 @@ async function getSessionWithDetails(
       session.liveQuestions.map(
         (question) => ({
           ...question,
+          correctAnswer: null,
 
           answers:
             question.answers.filter(

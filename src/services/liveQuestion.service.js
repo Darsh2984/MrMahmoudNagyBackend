@@ -107,6 +107,10 @@ async function createLiveQuestion({
   sessionId,
   prompt,
   gradeOutOf,
+  type,
+  options,
+  correctAnswer,
+  questionImage,
   createdBy,
 }) {
   if (!sessionId) {
@@ -121,7 +125,10 @@ async function createLiveQuestion({
       ? prompt.trim()
       : "";
 
-  if (!normalizedPrompt) {
+  const normalizedType =
+    type === "MCQ" ? "MCQ" : "WRITTEN";
+
+  if (!normalizedPrompt && !questionImage) {
     throw createHttpError(
       400,
       "Question prompt is required"
@@ -166,12 +173,58 @@ async function createLiveQuestion({
     createdBy
   );
 
+  const normalizedOptions = {
+    A: String(options?.A || "").trim(),
+    B: String(options?.B || "").trim(),
+    C: String(options?.C || "").trim(),
+    D: String(options?.D || "").trim(),
+  };
+  const normalizedCorrectAnswer =
+    String(correctAnswer || "").toUpperCase();
+
+  if (
+    normalizedType === "MCQ" &&
+    !["A", "B", "C", "D"].includes(normalizedCorrectAnswer)
+  ) {
+    throw createHttpError(400, "Select the correct MCQ option");
+  }
+
+  const hasTypedOptions =
+    Object.values(normalizedOptions).some(Boolean);
+
+  if (
+    normalizedType === "MCQ" &&
+    hasTypedOptions &&
+    Object.values(normalizedOptions).some((value) => !value)
+  ) {
+    throw createHttpError(400, "Enter all four MCQ choices");
+  }
+
+  const questionImageUrl = questionImage
+    ? await storage.uploadBuffer(
+        questionImage.buffer,
+        questionImage.originalname,
+        questionImage.mimetype,
+        "live-questions"
+      )
+    : null;
+
   return prisma.liveQuestion.create({
     data: {
       sessionId,
-      prompt: normalizedPrompt,
+      prompt: normalizedPrompt || "Image question",
       gradeOutOf:
         numericGradeOutOf,
+      type: normalizedType,
+      questionImageUrl,
+      optionA: normalizedOptions.A || null,
+      optionB: normalizedOptions.B || null,
+      optionC: normalizedOptions.C || null,
+      optionD: normalizedOptions.D || null,
+      correctAnswer:
+        normalizedType === "MCQ"
+          ? normalizedCorrectAnswer
+          : null,
     },
   });
 }
@@ -183,13 +236,8 @@ async function submitAnswer({
   liveQuestionId,
   studentId,
   file,
+  selectedOption,
 }) {
-  if (!file) {
-    throw createHttpError(
-      400,
-      "No answer image provided"
-    );
-  }
 
   const question =
     await prisma.liveQuestion.findUnique({
@@ -198,6 +246,9 @@ async function submitAnswer({
       },
       select: {
         id: true,
+        type: true,
+        correctAnswer: true,
+        gradeOutOf: true,
 
         session: {
           select: {
@@ -212,6 +263,17 @@ async function submitAnswer({
       404,
       "Live question not found"
     );
+  }
+
+  const normalizedSelectedOption =
+    String(selectedOption || "").toUpperCase();
+
+  if (question.type === "MCQ") {
+    if (!["A", "B", "C", "D"].includes(normalizedSelectedOption)) {
+      throw createHttpError(400, "Select an answer from A to D");
+    }
+  } else if (!file) {
+    throw createHttpError(400, "No answer image provided");
   }
 
   const membership =
@@ -261,13 +323,19 @@ async function submitAnswer({
    * We intentionally store that key in the database.
    * It is signed only when returned to the frontend.
    */
-  const answerImageUrl =
-    await storage.uploadBuffer(
+  const answerImageUrl = file
+    ? await storage.uploadBuffer(
       file.buffer,
       file.originalname,
       file.mimetype,
       "live-answers"
-    );
+    )
+    : null;
+
+  const isMcq = question.type === "MCQ";
+  const isCorrect =
+    isMcq &&
+    normalizedSelectedOption === question.correctAnswer;
 
   const createdAnswer =
     await prisma.liveQuestionAnswer.create({
@@ -275,6 +343,15 @@ async function submitAnswer({
         liveQuestionId,
         studentId,
         answerImageUrl,
+        selectedOption:
+          isMcq ? normalizedSelectedOption : null,
+        ...(isMcq
+          ? {
+              grade: isCorrect ? question.gradeOutOf : 0,
+              status: "GRADED",
+              gradedAt: new Date(),
+            }
+          : {}),
       },
       include: {
         student: {

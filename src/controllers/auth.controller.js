@@ -286,6 +286,7 @@ async function deleteAssistant(req, res) {
       });
   }
 }
+
 module.exports = {
   registerStudent,
   listRegistrationYears,

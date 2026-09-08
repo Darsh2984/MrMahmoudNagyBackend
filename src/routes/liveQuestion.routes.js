@@ -5,7 +5,12 @@ const { requireAuth, requireRole, requireAssistantPermission } = require("../mid
 const { materialUpload } = require("../middleware/upload.middleware");
 
 // Teacher poses the question (covered by canManageSessions — it's part of running the session)
-router.post("/", requireAssistantPermission("canManageSessions"), liveQuestionController.createLiveQuestion);
+router.post(
+  "/",
+  requireAssistantPermission("canManageSessions"),
+  materialUpload.single("questionImage"),
+  liveQuestionController.createLiveQuestion
+);
 
 // Student photographs and uploads their answer
 router.post(
