@@ -321,6 +321,20 @@ async function getRawQuiz(
         include: {
           question: {
             include: {
+              chapter: {
+                include: {
+                  unit: {
+                    include: {
+                      year: {
+                        select: {
+                          id: true,
+                          name: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
               topics: {
                 include: {
                   topic: {

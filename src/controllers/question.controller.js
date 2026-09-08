@@ -67,11 +67,6 @@ async function createQuestion(
         req.user
       );
 
-    const topicIds =
-      parseTopicIds(
-        req.body.topicIds
-      );
-
     const question =
       await questionService.createQuestion({
         title: req.body.title,
@@ -90,7 +85,7 @@ async function createQuestion(
           req.files
             ?.markschemeFile?.[0],
 
-        topicIds,
+        chapterId: req.body.chapterId,
       });
 
     res.json({
@@ -124,12 +119,12 @@ async function listQuestions(
           teacherId,
           {
             type: req.query.type,
+            yearId:
+              req.query.yearId,
             unitId:
               req.query.unitId,
             chapterId:
               req.query.chapterId,
-            topicId:
-              req.query.topicId,
             search:
               req.query.search,
           }
@@ -192,11 +187,6 @@ async function updateQuestion(
         req.user
       );
 
-    const topicIds =
-      parseTopicIds(
-        req.body.topicIds
-      );
-
     const question =
       await questionService
         .updateQuestion(
@@ -212,7 +202,8 @@ async function updateQuestion(
               req.body.points,
             correctAnswer:
               req.body.correctAnswer,
-            topicIds,
+            chapterId:
+              req.body.chapterId,
 
             removeMarkscheme:
               parseBoolean(

@@ -1,900 +1,278 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 
-const QUESTION_TYPES = ["MCQ", "WRITTEN"];
-const MCQ_ANSWERS = ["A", "B", "C", "D"];
+const TYPES = ["MCQ", "WRITTEN"];
+const ANSWERS = ["A", "B", "C", "D"];
+const fail = (status, msg) => {
+  throw { status, msg };
+};
+const text = (value) =>
+  typeof value === "string" ? value.trim() : "";
+const optionalText = (value) => text(value) || null;
 
-function normalizeText(value) {
-  return typeof value === "string"
-    ? value.trim()
-    : "";
-}
-
-function normalizeOptionalText(value) {
-  const normalized = normalizeText(value);
-
-  return normalized || null;
-}
-
-function normalizeQuestionType(type) {
-  const normalizedType =
-    normalizeText(type).toUpperCase();
-
-  if (
-    !QUESTION_TYPES.includes(
-      normalizedType
-    )
-  ) {
-    throw {
-      status: 400,
-      msg:
-        "Question type must be MCQ or WRITTEN",
-    };
+function normalizeType(value) {
+  const type = text(value).toUpperCase();
+  if (!TYPES.includes(type)) {
+    fail(400, "Question type must be MCQ or WRITTEN");
   }
-
-  return normalizedType;
+  return type;
 }
 
-function normalizeCorrectAnswer(
-  type,
-  correctAnswer
-) {
-  const normalizedAnswer =
-    normalizeText(
-      correctAnswer
-    ).toUpperCase();
+function normalizePoints(value) {
+  const points = Number(value);
+  if (!Number.isFinite(points) || points <= 0) {
+    fail(400, "Question points must be greater than zero");
+  }
+  return points;
+}
 
+function normalizeAnswer(type, value) {
+  const answer = text(value).toUpperCase();
   if (type === "MCQ") {
-    if (
-      !MCQ_ANSWERS.includes(
-        normalizedAnswer
-      )
-    ) {
-      throw {
-        status: 400,
-        msg:
-          "MCQ questions require correctAnswer to be A, B, C, or D",
-      };
+    if (!ANSWERS.includes(answer)) {
+      fail(400, "MCQ questions require a correct answer from A to D");
     }
-
-    return normalizedAnswer;
+    return answer;
   }
-
-  if (normalizedAnswer) {
-    throw {
-      status: 400,
-      msg:
-        "Written questions cannot have a correctAnswer",
-    };
+  if (answer) {
+    fail(400, "Written questions cannot have a correct answer");
   }
-
   return null;
 }
 
-function normalizePoints(points) {
-  const numericPoints = Number(points);
-
-  if (
-    !Number.isFinite(numericPoints) ||
-    numericPoints <= 0
-  ) {
-    throw {
-      status: 400,
-      msg:
-        "Question points must be greater than zero",
-    };
-  }
-
-  return numericPoints;
+async function assertChapter(chapterId) {
+  const id = text(chapterId);
+  if (!id) fail(400, "Select a chapter for the question");
+  const chapter = await prisma.chapter.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+  if (!chapter) fail(400, "The selected chapter does not exist");
+  return id;
 }
 
-function normalizeTopicIds(topicIds) {
-  if (!Array.isArray(topicIds)) {
-    throw {
-      status: 400,
-      msg:
-        "topicIds must be an array",
-    };
-  }
-
-  const normalizedIds = [
-    ...new Set(
-      topicIds
-        .map((topicId) =>
-          normalizeText(topicId)
-        )
-        .filter(Boolean)
-    ),
-  ];
-
-  if (!normalizedIds.length) {
-    throw {
-      status: 400,
-      msg:
-        "At least one topicId is required",
-    };
-  }
-
-  return normalizedIds;
-}
-
-async function assertTopicsExist(
-  topicIds
-) {
-  const topics =
-    await prisma.topic.findMany({
-      where: {
-        id: {
-          in: topicIds,
+const include = {
+  chapter: {
+    include: {
+      unit: {
+        include: {
+          year: { select: { id: true, name: true } },
         },
       },
+    },
+  },
+  _count: { select: { quizzes: true, checkpoints: true } },
+};
 
-      select: {
-        id: true,
-      },
-    });
-
-  if (
-    topics.length !== topicIds.length
-  ) {
-    throw {
-      status: 400,
-      msg:
-        "One or more selected topics do not exist",
-    };
-  }
-}
-
-async function assertQuestionExists(
-  questionId,
-  teacherId
-) {
-  const question =
-    await prisma.question.findFirst({
-      where: {
-        id: questionId,
-        teacherId,
-      },
-
-      include: {
-        topics: {
-          include: {
-            topic: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-          },
-        },
-
-        _count: {
-          select: {
-            quizzes: true,
-            checkpoints: true,
-          },
-        },
-      },
-    });
-
-  if (!question) {
-    throw {
-      status: 404,
-      msg: "Question not found",
-    };
-  }
-
+async function getOwned(questionId, teacherId) {
+  const question = await prisma.question.findFirst({
+    where: { id: questionId, teacherId },
+    include,
+  });
+  if (!question) fail(404, "Question not found");
   return question;
 }
 
-async function addSignedFileUrls(
-  question
-) {
-  const [
-    questionFileUrl,
-    markschemeFileUrl,
-  ] = await Promise.all([
-    storage.getSignedUrl(
-      question.questionFileUrl,
-      15
-    ),
-
+async function sign(question) {
+  const [questionFileUrl, markschemeFileUrl] = await Promise.all([
+    storage.getSignedUrl(question.questionFileUrl, 15),
     question.markschemeFileUrl
-      ? storage.getSignedUrl(
-          question.markschemeFileUrl,
-          15
-        )
+      ? storage.getSignedUrl(question.markschemeFileUrl, 15)
       : Promise.resolve(null),
   ]);
-
   return {
     ...question,
-
-    questionFileKey:
-      question.questionFileUrl,
-
-    markschemeFileKey:
-      question.markschemeFileUrl,
-
+    questionFileKey: question.questionFileUrl,
+    markschemeFileKey: question.markschemeFileUrl,
     questionFileUrl,
     markschemeFileUrl,
   };
 }
 
-async function createQuestion({
-  title,
-  reference,
-  type,
-  points,
-  correctAnswer,
-  teacherId,
-  questionFile,
-  markschemeFile,
-  topicIds,
-}) {
-  const normalizedTitle =
-    normalizeText(title);
-
-  if (!normalizedTitle) {
-    throw {
-      status: 400,
-      msg:
-        "Question title is required",
-    };
+async function createQuestion(input) {
+  const title = text(input.title);
+  if (!title) fail(400, "Question title is required");
+  if (!input.teacherId) fail(401, "Unauthorized");
+  if (!input.questionFile) {
+    fail(400, "A question PDF or image is required");
   }
 
-  if (!teacherId) {
-    throw {
-      status: 401,
-      msg: "Unauthorized",
-    };
-  }
-
-  if (!questionFile) {
-    throw {
-      status: 400,
-      msg:
-        "A question PDF or image is required",
-    };
-  }
-
-  const normalizedType =
-    normalizeQuestionType(type);
-
-  const normalizedAnswer =
-    normalizeCorrectAnswer(
-      normalizedType,
-      correctAnswer
-    );
-
-  const normalizedPoints =
-    normalizePoints(points);
-
-  const normalizedTopicIds =
-    normalizeTopicIds(topicIds);
-
-  await assertTopicsExist(
-    normalizedTopicIds
-  );
-
-  let questionFileKey = null;
-  let markschemeFileKey = null;
+  const type = normalizeType(input.type);
+  const chapterId = await assertChapter(input.chapterId);
+  const points = normalizePoints(input.points);
+  const correctAnswer = normalizeAnswer(type, input.correctAnswer);
+  let questionKey;
+  let markschemeKey;
 
   try {
-    questionFileKey =
-      await storage.uploadBuffer(
-        questionFile.buffer,
-        questionFile.originalname,
-        questionFile.mimetype,
-        "questions"
+    questionKey = await storage.uploadBuffer(
+      input.questionFile.buffer,
+      input.questionFile.originalname,
+      input.questionFile.mimetype,
+      "questions"
+    );
+    if (input.markschemeFile && type === "WRITTEN") {
+      markschemeKey = await storage.uploadBuffer(
+        input.markschemeFile.buffer,
+        input.markschemeFile.originalname,
+        input.markschemeFile.mimetype,
+        "markschemes"
       );
-
-    if (markschemeFile) {
-      markschemeFileKey =
-        await storage.uploadBuffer(
-          markschemeFile.buffer,
-          markschemeFile.originalname,
-          markschemeFile.mimetype,
-          "markschemes"
-        );
     }
-
-    const question =
+    return sign(
       await prisma.question.create({
         data: {
-          title: normalizedTitle,
-
-          reference:
-            normalizeOptionalText(
-              reference
-            ),
-
-          type: normalizedType,
-          points: normalizedPoints,
-
-          correctAnswer:
-            normalizedAnswer,
-
-          questionFileUrl:
-            questionFileKey,
-
-          markschemeFileUrl:
-            normalizedType ===
-              "WRITTEN"
-              ? markschemeFileKey
-              : null,
-
-          teacherId,
-
-          topics: {
-            create:
-              normalizedTopicIds.map(
-                (topicId) => ({
-                  topicId,
-                })
-              ),
-          },
+          title,
+          reference: optionalText(input.reference),
+          type,
+          points,
+          correctAnswer,
+          questionFileUrl: questionKey,
+          markschemeFileUrl: markschemeKey || null,
+          teacherId: input.teacherId,
+          chapterId,
         },
-
-        include: {
-          topics: {
-            include: {
-              topic: {
-                include: {
-                  chapter: {
-                    include: {
-                      unit: {
-                        select: {
-                          id: true,
-                          name: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      });
-
-    return addSignedFileUrls(
-      question
+        include,
+      })
     );
   } catch (error) {
     await Promise.all([
-      questionFileKey
-        ? storage.deleteFile(
-            questionFileKey
-          )
-        : Promise.resolve(),
-
-      markschemeFileKey
-        ? storage.deleteFile(
-            markschemeFileKey
-          )
-        : Promise.resolve(),
+      questionKey ? storage.deleteFile(questionKey) : Promise.resolve(),
+      markschemeKey ? storage.deleteFile(markschemeKey) : Promise.resolve(),
     ]);
-
     throw error;
   }
 }
 
 async function listQuestionsForTeacher(
   teacherId,
-  {
-    type,
-    unitId,
-    chapterId,
-    topicId,
-    search,
-  } = {}
+  { type, yearId, unitId, chapterId, search } = {}
 ) {
-  if (!teacherId) {
-    throw {
-      status: 401,
-      msg: "Unauthorized",
-    };
-  }
-
-  const normalizedType = type
-    ? normalizeQuestionType(type)
-    : null;
-
-  const normalizedSearch =
-    normalizeText(search);
-
-  const questions =
-    await prisma.question.findMany({
-      where: {
-        teacherId,
-
-        ...(normalizedType
-          ? {
-              type: normalizedType,
-            }
-          : {}),
-
-        ...(topicId
-          ? {
-              topics: {
-                some: {
-                  topicId,
-                },
-              },
-            }
-          : {}),
-
-        ...(chapterId
-          ? {
-              topics: {
-                some: {
-                  topic: {
-                    chapterId,
-                  },
-                },
-              },
-            }
-          : {}),
-
-        ...(unitId
-          ? {
-              topics: {
-                some: {
-                  topic: {
-                    chapter: {
-                      unitId,
-                    },
-                  },
-                },
-              },
-            }
-          : {}),
-
-        ...(normalizedSearch
-          ? {
-              OR: [
-                {
-                  title: {
-                    contains:
-                      normalizedSearch,
-                    mode: "insensitive",
-                  },
-                },
-
-                {
-                  reference: {
-                    contains:
-                      normalizedSearch,
-                    mode: "insensitive",
-                  },
-                },
-
-                {
-                  topics: {
-                    some: {
-                      topic: {
-                        name: {
-                          contains:
-                            normalizedSearch,
-                          mode:
-                            "insensitive",
-                        },
-                      },
-                    },
-                  },
-                },
-              ],
-            }
-          : {}),
-      },
-
-      include: {
-        topics: {
-          include: {
-            topic: {
-              include: {
-                chapter: {
-                  include: {
-                    unit: {
-                      select: {
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-
-        _count: {
-          select: {
-            quizzes: true,
-            checkpoints: true,
-          },
-        },
-      },
-
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
-
-  return Promise.all(
-    questions.map(
-      addSignedFileUrls
-    )
-  );
+  if (!teacherId) fail(401, "Unauthorized");
+  const query = text(search);
+  const questions = await prisma.question.findMany({
+    where: {
+      teacherId,
+      ...(type ? { type: normalizeType(type) } : {}),
+      ...(chapterId ? { chapterId } : {}),
+      ...(unitId ? { chapter: { unitId } } : {}),
+      ...(yearId ? { chapter: { unit: { yearId } } } : {}),
+      ...(query
+        ? {
+            OR: [
+              { title: { contains: query, mode: "insensitive" } },
+              { reference: { contains: query, mode: "insensitive" } },
+              { chapter: { name: { contains: query, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    },
+    include,
+    orderBy: { createdAt: "desc" },
+  });
+  return Promise.all(questions.map(sign));
 }
 
-async function getQuestionForTeacher(
-  questionId,
-  teacherId
-) {
-  const question =
-    await assertQuestionExists(
-      questionId,
-      teacherId
-    );
-
-  const detailedQuestion =
-    await prisma.question.findUnique({
-      where: {
-        id: question.id,
-      },
-
-      include: {
-        topics: {
-          include: {
-            topic: {
-              include: {
-                chapter: {
-                  include: {
-                    unit: {
-                      select: {
-                        id: true,
-                        name: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-
-        _count: {
-          select: {
-            quizzes: true,
-            checkpoints: true,
-          },
-        },
-      },
-    });
-
-  return addSignedFileUrls(
-    detailedQuestion
-  );
+async function getQuestionForTeacher(questionId, teacherId) {
+  return sign(await getOwned(questionId, teacherId));
 }
 
-async function updateQuestion(
-  questionId,
-  teacherId,
-  {
-    title,
-    reference,
+async function updateQuestion(questionId, teacherId, input) {
+  const existing = await getOwned(questionId, teacherId);
+  const title = input.title === undefined ? existing.title : text(input.title);
+  if (!title) fail(400, "Question title is required");
+  const type =
+    input.type === undefined ? existing.type : normalizeType(input.type);
+  const points =
+    input.points === undefined ? existing.points : normalizePoints(input.points);
+  const correctAnswer = normalizeAnswer(
     type,
-    points,
-    correctAnswer,
-    topicIds,
-    removeMarkscheme = false,
-    questionFile,
-    markschemeFile,
-  }
-) {
-  const existingQuestion =
-    await assertQuestionExists(
-      questionId,
-      teacherId
-    );
-
-  const normalizedTitle =
-    title === undefined
-      ? existingQuestion.title
-      : normalizeText(title);
-
-  if (!normalizedTitle) {
-    throw {
-      status: 400,
-      msg:
-        "Question title is required",
-    };
-  }
-
-  const normalizedType =
-    type === undefined
-      ? existingQuestion.type
-      : normalizeQuestionType(type);
-
-  const normalizedPoints =
-    points === undefined
-      ? existingQuestion.points
-      : normalizePoints(points);
-
-  let answerInput = correctAnswer;
-
-  if (
-    correctAnswer === undefined &&
-    normalizedType ===
-      existingQuestion.type
-  ) {
-    answerInput =
-      existingQuestion.correctAnswer;
-  }
-
-  const normalizedAnswer =
-    normalizeCorrectAnswer(
-      normalizedType,
-      answerInput
-    );
-
-  let normalizedTopicIds = null;
-
-  if (topicIds !== undefined) {
-    normalizedTopicIds =
-      normalizeTopicIds(topicIds);
-
-    await assertTopicsExist(
-      normalizedTopicIds
-    );
-  }
-
-  let newQuestionFileKey = null;
-  let newMarkschemeFileKey = null;
+    input.correctAnswer === undefined
+      ? existing.correctAnswer
+      : input.correctAnswer
+  );
+  const chapterId =
+    input.chapterId === undefined
+      ? existing.chapterId
+      : await assertChapter(input.chapterId);
+  let questionKey;
+  let markschemeKey;
 
   try {
-    if (questionFile) {
-      newQuestionFileKey =
-        await storage.uploadBuffer(
-          questionFile.buffer,
-          questionFile.originalname,
-          questionFile.mimetype,
-          "questions"
-        );
-    }
-
-    if (markschemeFile) {
-      newMarkschemeFileKey =
-        await storage.uploadBuffer(
-          markschemeFile.buffer,
-          markschemeFile.originalname,
-          markschemeFile.mimetype,
-          "markschemes"
-        );
-    }
-
-    let targetMarkschemeKey =
-      existingQuestion
-        .markschemeFileUrl;
-
-    if (
-      normalizedType === "MCQ" ||
-      removeMarkscheme
-    ) {
-      targetMarkschemeKey = null;
-    }
-
-    if (
-      normalizedType === "WRITTEN" &&
-      newMarkschemeFileKey
-    ) {
-      targetMarkschemeKey =
-        newMarkschemeFileKey;
-    }
-
-    const question =
-      await prisma.$transaction(
-        async (tx) => {
-          if (normalizedTopicIds) {
-            await tx.questionTopic.deleteMany({
-              where: {
-                questionId,
-              },
-            });
-          }
-
-          return tx.question.update({
-            where: {
-              id: questionId,
-            },
-
-            data: {
-              title: normalizedTitle,
-
-              reference:
-                reference === undefined
-                  ? existingQuestion.reference
-                  : normalizeOptionalText(
-                      reference
-                    ),
-
-              type: normalizedType,
-              points: normalizedPoints,
-
-              correctAnswer:
-                normalizedAnswer,
-
-              questionFileUrl:
-                newQuestionFileKey ||
-                existingQuestion
-                  .questionFileUrl,
-
-              markschemeFileUrl:
-                targetMarkschemeKey,
-
-              ...(normalizedTopicIds
-                ? {
-                    topics: {
-                      create:
-                        normalizedTopicIds.map(
-                          (topicId) => ({
-                            topicId,
-                          })
-                        ),
-                    },
-                  }
-                : {}),
-            },
-
-            include: {
-              topics: {
-                include: {
-                  topic: {
-                    include: {
-                      chapter: {
-                        include: {
-                          unit: {
-                            select: {
-                              id: true,
-                              name: true,
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-
-              _count: {
-                select: {
-                  quizzes: true,
-                  checkpoints: true,
-                },
-              },
-            },
-          });
-        }
-      );
-
-    const oldFilesToDelete = [];
-
-    if (
-      newQuestionFileKey &&
-      existingQuestion
-        .questionFileUrl
-    ) {
-      oldFilesToDelete.push(
-        existingQuestion
-          .questionFileUrl
+    if (input.questionFile) {
+      questionKey = await storage.uploadBuffer(
+        input.questionFile.buffer,
+        input.questionFile.originalname,
+        input.questionFile.mimetype,
+        "questions"
       );
     }
-
-    const markschemeWasReplaced =
-      newMarkschemeFileKey &&
-      existingQuestion
-        .markschemeFileUrl;
-
-    const markschemeWasRemoved =
-      existingQuestion
-        .markschemeFileUrl &&
-      !question.markschemeFileUrl;
-
-    if (
-      markschemeWasReplaced ||
-      markschemeWasRemoved
-    ) {
-      oldFilesToDelete.push(
-        existingQuestion
-          .markschemeFileUrl
+    if (input.markschemeFile && type === "WRITTEN") {
+      markschemeKey = await storage.uploadBuffer(
+        input.markschemeFile.buffer,
+        input.markschemeFile.originalname,
+        input.markschemeFile.mimetype,
+        "markschemes"
       );
     }
+    const nextMarkscheme =
+      type === "MCQ" || input.removeMarkscheme
+        ? null
+        : markschemeKey || existing.markschemeFileUrl;
 
-    await Promise.all(
-      oldFilesToDelete.map(
-        storage.deleteFile
-      )
-    );
+    const question = await prisma.question.update({
+      where: { id: questionId },
+      data: {
+        title,
+        reference:
+          input.reference === undefined
+            ? existing.reference
+            : optionalText(input.reference),
+        type,
+        points,
+        correctAnswer,
+        chapterId,
+        questionFileUrl: questionKey || existing.questionFileUrl,
+        markschemeFileUrl: nextMarkscheme,
+      },
+      include,
+    });
 
-    return addSignedFileUrls(
-      question
-    );
+    const oldFiles = [];
+    if (questionKey) oldFiles.push(existing.questionFileUrl);
+    if (
+      existing.markschemeFileUrl &&
+      existing.markschemeFileUrl !== nextMarkscheme
+    ) {
+      oldFiles.push(existing.markschemeFileUrl);
+    }
+    await Promise.all(oldFiles.map(storage.deleteFile));
+    return sign(question);
   } catch (error) {
     await Promise.all([
-      newQuestionFileKey
-        ? storage.deleteFile(
-            newQuestionFileKey
-          )
-        : Promise.resolve(),
-
-      newMarkschemeFileKey
-        ? storage.deleteFile(
-            newMarkschemeFileKey
-          )
-        : Promise.resolve(),
+      questionKey ? storage.deleteFile(questionKey) : Promise.resolve(),
+      markschemeKey ? storage.deleteFile(markschemeKey) : Promise.resolve(),
     ]);
-
     throw error;
   }
 }
 
-async function deleteQuestion(
-  questionId,
-  teacherId
-) {
-  const question =
-    await assertQuestionExists(
-      questionId,
-      teacherId
-    );
-
-  if (
-    question._count.quizzes > 0
-  ) {
-    throw {
-      status: 400,
-      msg:
-        "Cannot delete a question that is used in a quiz",
-    };
+async function deleteQuestion(questionId, teacherId) {
+  const question = await getOwned(questionId, teacherId);
+  if (question._count.quizzes) {
+    fail(400, "Cannot delete a question that is used in a quiz");
   }
-
-  if (
-    question._count.checkpoints > 0
-  ) {
-    throw {
-      status: 400,
-      msg:
-        "Cannot delete a question that is used by a video checkpoint",
-    };
+  if (question._count.checkpoints) {
+    fail(400, "Cannot delete a question used by a video checkpoint");
   }
-
-  await prisma.$transaction(
-    async (tx) => {
-      await tx.questionTopic.deleteMany({
-        where: {
-          questionId,
-        },
-      });
-
-      await tx.question.delete({
-        where: {
-          id: questionId,
-        },
-      });
-    }
-  );
-
+  await prisma.$transaction([
+    prisma.questionTopic.deleteMany({ where: { questionId } }),
+    prisma.question.delete({ where: { id: questionId } }),
+  ]);
   await Promise.all([
-    storage.deleteFile(
-      question.questionFileUrl
-    ),
-
+    storage.deleteFile(question.questionFileUrl),
     question.markschemeFileUrl
-      ? storage.deleteFile(
-          question.markschemeFileUrl
-        )
+      ? storage.deleteFile(question.markschemeFileUrl)
       : Promise.resolve(),
   ]);
 }
@@ -906,3 +284,4 @@ module.exports = {
   updateQuestion,
   deleteQuestion,
 };
+

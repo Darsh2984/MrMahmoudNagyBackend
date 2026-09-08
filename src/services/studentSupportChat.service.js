@@ -309,6 +309,39 @@ async function listChatsForUser(user) {
     );
   }
 
+  // Repair chats for memberships created before support chats were
+  // introduced, or by an import/legacy assignment path.
+  const accessibleMembershipWhere =
+    user.role === "STUDENT"
+      ? { studentId: user.id }
+      : user.role === "ASSISTANT" && !isAdminLevel(user)
+        ? {
+            group: {
+              assistantAssignments: {
+                some: { assistantId: user.id },
+              },
+            },
+          }
+        : isAdminLevel(user)
+          ? {}
+          : { id: "__NO_ACCESS__" };
+
+  const accessibleMemberships =
+    await prisma.groupMembership.findMany({
+      where: accessibleMembershipWhere,
+      select: { groupId: true, studentId: true },
+    });
+
+  if (accessibleMemberships.length) {
+    await prisma.studentSupportChat.createMany({
+      data: accessibleMemberships.map((membership) => ({
+        groupId: membership.groupId,
+        studentId: membership.studentId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+
   const where = isAdminLevel(user)
     ? {}
     : user.role === "STUDENT"
