@@ -14,6 +14,7 @@ async function createLiveQuestion(req, res) {
         D: req.body.optionD,
       },
       correctAnswer: req.body.correctAnswer,
+      durationSeconds: req.body.durationSeconds,
       questionImage: req.file,
       createdBy: req.user,
     });

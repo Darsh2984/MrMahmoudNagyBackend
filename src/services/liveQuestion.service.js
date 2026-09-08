@@ -110,6 +110,7 @@ async function createLiveQuestion({
   type,
   options,
   correctAnswer,
+  durationSeconds,
   questionImage,
   createdBy,
 }) {
@@ -147,6 +148,20 @@ async function createLiveQuestion({
     throw createHttpError(
       400,
       "gradeOutOf must be a number greater than 0"
+    );
+  }
+
+  const numericDurationSeconds =
+    Number(durationSeconds);
+
+  if (
+    !Number.isInteger(numericDurationSeconds) ||
+    numericDurationSeconds < 1 ||
+    numericDurationSeconds > 10800
+  ) {
+    throw createHttpError(
+      400,
+      "Question timer must be between 1 second and 180 minutes"
     );
   }
 
@@ -209,6 +224,12 @@ async function createLiveQuestion({
       )
     : null;
 
+  const postedAt = new Date();
+  const closesAt = new Date(
+    postedAt.getTime() +
+      numericDurationSeconds * 1000
+  );
+
   return prisma.liveQuestion.create({
     data: {
       sessionId,
@@ -225,6 +246,10 @@ async function createLiveQuestion({
         normalizedType === "MCQ"
           ? normalizedCorrectAnswer
           : null,
+      durationSeconds:
+        numericDurationSeconds,
+      closesAt,
+      createdAt: postedAt,
     },
   });
 }
@@ -249,6 +274,7 @@ async function submitAnswer({
         type: true,
         correctAnswer: true,
         gradeOutOf: true,
+        closesAt: true,
 
         session: {
           select: {
@@ -295,6 +321,16 @@ async function submitAnswer({
     throw createHttpError(
       403,
       "You cannot answer a live question outside your group"
+    );
+  }
+
+  if (
+    question.closesAt &&
+    new Date() >= question.closesAt
+  ) {
+    throw createHttpError(
+      400,
+      "The timer for this live question has expired"
     );
   }
 

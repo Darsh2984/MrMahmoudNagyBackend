@@ -788,6 +788,8 @@ model LiveQuestion {
   optionC    String?
   optionD    String?
   correctAnswer String?
+  durationSeconds Int?
+  closesAt   DateTime?
   createdAt  DateTime @default(now())
 
   answers LiveQuestionAnswer[]
