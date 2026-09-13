@@ -68,36 +68,82 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, al
     taskFileUrl = await storage.uploadBuffer(taskFile.buffer, taskFile.originalname, taskFile.mimetype, "tasks");
   }
 
-  return prisma.task.update({
-    where: { id: taskId },
-    data: {
-      ...(title ? { title } : {}),
-      ...(description !== undefined ? { description } : {}),
-      ...(deadline ? { deadline: new Date(deadline) } : {}),
-      ...(gradeOutOf !== undefined ? { gradeOutOf } : {}),
-      ...(allowLateSubmission !== undefined ? { allowLateSubmission } : {}),
-      ...(groupIds !== undefined
-        ? {
-            groups: {
-              deleteMany: {},
-              create: groupIds.map((groupId) => ({ groupId })),
-            },
-          }
-        : {}),
-      taskFileUrl,
-    },
-    include: {
-      groups: {
-        include: {
-          group: {
-            select: {
-              id: true,
-              name: true,
+  const updatedDeadline = deadline ? new Date(deadline) : null;
+
+  return prisma.$transaction(async (tx) => {
+    const updatedTask = await tx.task.update({
+      where: { id: taskId },
+      data: {
+        ...(title ? { title } : {}),
+        ...(description !== undefined ? { description } : {}),
+        ...(updatedDeadline ? { deadline: updatedDeadline } : {}),
+        ...(gradeOutOf !== undefined ? { gradeOutOf } : {}),
+        ...(allowLateSubmission !== undefined ? { allowLateSubmission } : {}),
+        ...(groupIds !== undefined
+          ? {
+              groups: {
+                deleteMany: {},
+                create: groupIds.map((groupId) => ({ groupId })),
+              },
+            }
+          : {}),
+        taskFileUrl,
+      },
+      include: {
+        groups: {
+          include: {
+            group: {
+              select: {
+                id: true,
+                name: true,
+              },
             },
           },
         },
       },
-    },
+    });
+
+    if (updatedDeadline) {
+      const submissions = await tx.submission.findMany({
+        where: { taskId },
+        select: { id: true },
+      });
+
+      const submissionIds = submissions.map(({ id }) => id);
+
+      await Promise.all([
+        tx.submission.updateMany({
+          where: {
+            taskId,
+            lastModifiedAt: { lte: updatedDeadline },
+          },
+          data: { lastModifiedAfterDeadline: false },
+        }),
+        tx.submission.updateMany({
+          where: {
+            taskId,
+            lastModifiedAt: { gt: updatedDeadline },
+          },
+          data: { lastModifiedAfterDeadline: true },
+        }),
+        tx.submissionFile.updateMany({
+          where: {
+            submissionId: { in: submissionIds },
+            uploadedAt: { lte: updatedDeadline },
+          },
+          data: { uploadedAfterDeadline: false },
+        }),
+        tx.submissionFile.updateMany({
+          where: {
+            submissionId: { in: submissionIds },
+            uploadedAt: { gt: updatedDeadline },
+          },
+          data: { uploadedAfterDeadline: true },
+        }),
+      ]);
+    }
+
+    return updatedTask;
   });
 }
 
