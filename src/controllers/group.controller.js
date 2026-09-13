@@ -76,6 +76,7 @@ async function addStudent(req, res) {
         await groupService.addStudentsToGroup({
           groupId: req.params.groupId,
           studentIds,
+          viewer: req.user,
         });
 
       return res.json({
@@ -91,6 +92,7 @@ async function addStudent(req, res) {
       await groupService.addStudentToGroup({
         groupId: req.params.groupId,
         studentId: req.body.studentId,
+        viewer: req.user,
       });
 
     return res.json({

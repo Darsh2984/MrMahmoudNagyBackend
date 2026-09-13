@@ -117,7 +117,38 @@ async function getStudentProfile(studentId) {
 /**
  * Students not yet in any group.
  */
-async function listUnassignedStudents() {
+async function listUnassignedStudents({ viewer, groupId } = {}) {
+  const isRegularAssistant =
+    viewer?.role === "ASSISTANT" &&
+    viewer?.isHeadAssistant !== true;
+
+  if (isRegularAssistant) {
+    if (!groupId) {
+      throw {
+        status: 400,
+        msg: "Select an assigned group first.",
+      };
+    }
+
+    const assignment =
+      await prisma.assistantGroupAssignment.findUnique({
+        where: {
+          assistantId_groupId: {
+            assistantId: viewer.id,
+            groupId,
+          },
+        },
+        select: { id: true },
+      });
+
+    if (!assignment) {
+      throw {
+        status: 403,
+        msg: "You can only view students while managing an assigned group.",
+      };
+    }
+  }
+
   return prisma.user.findMany({
     where: {
       role: "STUDENT",

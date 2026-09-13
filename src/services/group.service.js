@@ -303,10 +303,50 @@ function normalizeStudentIds({
   );
 }
 
+async function assertCanAddStudentsToGroup({
+  groupId,
+  viewer,
+}) {
+  const isAdminLevel =
+    viewer?.role === "TEACHER" ||
+    (viewer?.role === "ASSISTANT" &&
+      viewer?.isHeadAssistant === true);
+
+  if (isAdminLevel) {
+    return;
+  }
+
+  if (viewer?.role !== "ASSISTANT") {
+    throw {
+      status: 403,
+      msg: "You cannot add students to this group.",
+    };
+  }
+
+  const assignment =
+    await prisma.assistantGroupAssignment.findUnique({
+      where: {
+        assistantId_groupId: {
+          assistantId: viewer.id,
+          groupId,
+        },
+      },
+      select: { id: true },
+    });
+
+  if (!assignment) {
+    throw {
+      status: 403,
+      msg: "You can only add students to groups assigned to you.",
+    };
+  }
+}
+
 async function addStudentsToGroup({
   groupId,
   studentId,
   studentIds,
+  viewer,
 }) {
   const normalizedStudentIds =
     normalizeStudentIds({
@@ -338,6 +378,11 @@ async function addStudentsToGroup({
       msg: "Group not found.",
     };
   }
+
+  await assertCanAddStudentsToGroup({
+    groupId,
+    viewer,
+  });
 
   const students =
     await prisma.user.findMany({
@@ -421,10 +466,12 @@ async function addStudentsToGroup({
 async function addStudentToGroup({
   groupId,
   studentId,
+  viewer,
 }) {
   const result = await addStudentsToGroup({
     groupId,
     studentId,
+    viewer,
   });
 
   return prisma.groupMembership.findUnique({

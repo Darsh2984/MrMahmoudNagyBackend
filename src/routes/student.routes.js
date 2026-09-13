@@ -12,7 +12,7 @@ const {
 // Static routes must be before "/:studentId".
 router.get(
   "/status/unassigned",
-  requireAdminLevel,
+  requireRole("TEACHER", "ASSISTANT"),
   studentController.listUnassigned
 );
 

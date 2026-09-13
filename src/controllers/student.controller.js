@@ -20,7 +20,10 @@ async function getProfile(req, res) {
 
 async function listUnassigned(req, res) {
   try {
-    const students = await studentService.listUnassignedStudents();
+    const students = await studentService.listUnassignedStudents({
+      viewer: req.user,
+      groupId: req.query.groupId,
+    });
     res.json(students);
   } catch (err) {
     res.status(err.status || 500).json({ msg: err.msg || "Error listing unassigned students" });
