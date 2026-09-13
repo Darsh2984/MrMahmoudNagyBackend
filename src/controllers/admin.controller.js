@@ -1,5 +1,22 @@
 const adminService = require("../services/admin.service");
 
+async function listStudentActivity(req, res) {
+  try {
+    const result = await adminService.listStudentActivity({
+      page: req.query.page,
+      limit: req.query.limit,
+      outcome: req.query.outcome,
+      search: req.query.search,
+    });
+
+    return res.json(result);
+  } catch (err) {
+    return res.status(err.status || 500).json({
+      msg: err.msg || err.message || "Error loading student activity",
+    });
+  }
+}
+
 async function exportUsers(req, res) {
   try {
     const workbook = await adminService.exportUsersWorkbook();
@@ -24,4 +41,4 @@ async function exportStudents(req, res) {
   }
 }
 
-module.exports = { exportUsers, exportStudents };
+module.exports = { listStudentActivity, exportUsers, exportStudents };

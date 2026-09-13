@@ -179,6 +179,7 @@ model User {
 
   notifications Notification[]
   pushTokens    PushToken[]
+  studentActivityLogs StudentActivityLog[] @relation("StudentActivityLogUser")
 
   homeworkFilesUploaded SubmissionFile[] @relation("SubmissionFileUploadedBy")
 
@@ -204,6 +205,36 @@ model School {
   name      String
   createdAt DateTime @default(now())
   students  User[]
+}
+
+model StudentActivityLog {
+  id String @id @default(uuid())
+
+  userId String?
+  user   User? @relation("StudentActivityLogUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Snapshot fields remain useful if the student account is later deleted.
+  userName  String
+  userEmail String
+
+  method     String
+  path       String
+  action     String
+  statusCode Int
+  successful Boolean
+
+  errorMessage String?
+  ipAddress   String?
+  userAgent   String?
+  durationMs  Int
+  metadata    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([successful, createdAt])
+  @@index([statusCode, createdAt])
 }
 
 // ---------------- Academic structure ----------------

@@ -20,6 +20,7 @@ const { Server } = require("socket.io");
 dotenv.config();
 
 const authenticate = require("./middleware/auth.middleware");
+const studentActivityLog = require("./middleware/studentActivityLog.middleware");
 const authRoutes = require("./routes/auth.routes");
 const unitRoutes = require("./routes/unit.routes");
 const chapterRoutes = require("./routes/chapter.routes");
@@ -60,6 +61,7 @@ app.set("io", io);
 app.use(cors());
 app.use(express.json());
 app.use(authenticate); // attaches req.user (or null) on every request
+app.use(studentActivityLog);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/units", unitRoutes);

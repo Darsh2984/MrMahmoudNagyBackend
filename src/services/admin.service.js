@@ -7,6 +7,56 @@ function styleHeaderRow(worksheet) {
   headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B3C49" } };
 }
 
+async function listStudentActivity({
+  page,
+  limit,
+  outcome,
+  search,
+}) {
+  const normalizedPage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const normalizedLimit = Math.min(
+    100,
+    Math.max(10, Number.parseInt(limit, 10) || 50),
+  );
+  const normalizedSearch = String(search || "").trim();
+
+  const where = {
+    ...(outcome === "errors" ? { successful: false } : {}),
+    ...(outcome === "success" ? { successful: true } : {}),
+    ...(normalizedSearch
+      ? {
+          OR: [
+            { userName: { contains: normalizedSearch, mode: "insensitive" } },
+            { userEmail: { contains: normalizedSearch, mode: "insensitive" } },
+            { action: { contains: normalizedSearch, mode: "insensitive" } },
+            { path: { contains: normalizedSearch, mode: "insensitive" } },
+            { errorMessage: { contains: normalizedSearch, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+
+  const [logs, total] = await prisma.$transaction([
+    prisma.studentActivityLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (normalizedPage - 1) * normalizedLimit,
+      take: normalizedLimit,
+    }),
+    prisma.studentActivityLog.count({ where }),
+  ]);
+
+  return {
+    logs,
+    pagination: {
+      page: normalizedPage,
+      limit: normalizedLimit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / normalizedLimit)),
+    },
+  };
+}
+
 async function exportUsersWorkbook() {
   const users = await prisma.user.findMany({ include: { school: { select: { name: true } } } });
 
@@ -84,4 +134,8 @@ async function exportStudentsWorkbook() {
   return workbook;
 }
 
-module.exports = { exportUsersWorkbook, exportStudentsWorkbook };
+module.exports = {
+  listStudentActivity,
+  exportUsersWorkbook,
+  exportStudentsWorkbook,
+};
