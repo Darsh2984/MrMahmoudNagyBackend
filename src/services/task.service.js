@@ -28,9 +28,39 @@ async function createTask({ title, description, teacherId, yearId, deadline, gra
 }
 
 /** Teacher/assistant edits a task after creation — including toggling late-submission and replacing the file. */
-async function updateTask(taskId, { title, description, deadline, gradeOutOf, allowLateSubmission, taskFile }) {
-  const task = await prisma.task.findUnique({ where: { id: taskId } });
+async function updateTask(taskId, { title, description, deadline, gradeOutOf, allowLateSubmission, groupIds, taskFile }, user) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      groups: {
+        select: { groupId: true },
+      },
+    },
+  });
   if (!task) throw { status: 404, msg: "Task not found" };
+
+  const isHeadAssistant =
+    user?.role === "ASSISTANT" && user?.isHeadAssistant === true;
+
+  if (user?.role === "ASSISTANT" && !isHeadAssistant) {
+    const currentGroupIds = task.groups.map(({ groupId }) => groupId);
+    const requestedGroupIds = groupIds || currentGroupIds;
+    const groupIdsToCheck = [...new Set([...currentGroupIds, ...requestedGroupIds])];
+
+    const assignmentCount = await prisma.assistantGroupAssignment.count({
+      where: {
+        assistantId: user.id,
+        groupId: { in: groupIdsToCheck },
+      },
+    });
+
+    if (assignmentCount !== groupIdsToCheck.length) {
+      throw {
+        status: 403,
+        msg: "You can only edit tasks for groups assigned to you",
+      };
+    }
+  }
 
   let taskFileUrl = task.taskFileUrl;
   if (taskFile) {
@@ -46,7 +76,27 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, al
       ...(deadline ? { deadline: new Date(deadline) } : {}),
       ...(gradeOutOf !== undefined ? { gradeOutOf } : {}),
       ...(allowLateSubmission !== undefined ? { allowLateSubmission } : {}),
+      ...(groupIds !== undefined
+        ? {
+            groups: {
+              deleteMany: {},
+              create: groupIds.map((groupId) => ({ groupId })),
+            },
+          }
+        : {}),
       taskFileUrl,
+    },
+    include: {
+      groups: {
+        include: {
+          group: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
     },
   });
 }
