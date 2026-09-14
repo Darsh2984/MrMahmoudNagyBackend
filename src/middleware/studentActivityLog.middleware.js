@@ -18,6 +18,18 @@ function describeAction(method, path) {
     return "Deleted a homework file";
   }
 
+  if (method === "GET" && /^\/api\/submissions\/task\/.+\/mine$/.test(path)) {
+    return "Checked homework submission";
+  }
+
+  if (method === "GET" && /^\/api\/students\//.test(path)) {
+    return "Opened a student profile";
+  }
+
+  if (method === "GET" && /^\/api\/tasks\//.test(path)) {
+    return "Opened a homework task";
+  }
+
   if (/^\/api\/quiz-student\//.test(path)) {
     return method === "GET" ? "Viewed a quiz" : "Submitted quiz activity";
   }
@@ -100,6 +112,17 @@ function buildMetadata(req) {
   };
 }
 
+function addResponseMetadata(metadata, responseMessage) {
+  if (!responseMessage) {
+    return metadata;
+  }
+
+  return {
+    ...(metadata || {}),
+    responseMessage: String(responseMessage).slice(0, 1000),
+  };
+}
+
 function getIpAddress(req) {
   const forwarded = req.headers["x-forwarded-for"];
 
@@ -157,7 +180,10 @@ module.exports = function studentActivityLog(req, res, next) {
           ipAddress: getIpAddress(req),
           userAgent: req.headers["user-agent"] || null,
           durationMs: Math.max(0, Date.now() - startedAt),
-          metadata: buildMetadata(req),
+          metadata: addResponseMetadata(
+            buildMetadata(req),
+            responseMessage,
+          ),
         },
       })
       .catch((error) => {
