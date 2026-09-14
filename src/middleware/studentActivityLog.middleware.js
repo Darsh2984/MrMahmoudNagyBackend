@@ -10,7 +10,19 @@ const SENSITIVE_BODY_FIELDS = new Set([
 ]);
 
 function describeAction(method, path) {
-  if (method === "POST" && /^\/api\/submissions\/task\//.test(path)) {
+  if (method === "POST" && /\/uploads\/prepare$/.test(path)) {
+    return "Prepared a homework upload";
+  }
+
+  if (method === "POST" && /\/uploads\/confirm$/.test(path)) {
+    return "Uploaded homework files";
+  }
+
+  if (method === "POST" && /\/uploads\/abort$/.test(path)) {
+    return "Cancelled a homework upload";
+  }
+
+  if (method === "POST" && /^\/api\/submissions\/task\/[^/]+$/.test(path)) {
     return "Uploaded homework files";
   }
 
@@ -63,6 +75,7 @@ function describeAction(method, path) {
 
 function getUploadedFiles(req) {
   const possibleFiles = [
+    ...(Array.isArray(req.activityFiles) ? req.activityFiles : []),
     ...(Array.isArray(req.uploadedFiles) ? req.uploadedFiles : []),
     ...(req.file ? [req.file] : []),
     ...Object.values(req.files || {}).flatMap((value) =>

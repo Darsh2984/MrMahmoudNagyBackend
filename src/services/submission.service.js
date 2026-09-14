@@ -4,6 +4,40 @@ const { notify } = require("./notification.service");
 
 const MAX_TOTAL_FILES = 20;
 const MAX_CORRECTED_FILES = 20;
+const MAX_HOMEWORK_FILE_SIZE =
+  50 * 1024 * 1024;
+
+const ALLOWED_HOMEWORK_MIME_TYPES =
+  new Set([
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+  ]);
+
+const HOMEWORK_TYPE_BY_EXTENSION = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".doc": "application/msword",
+  ".docx":
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx":
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx":
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".txt": "text/plain",
+};
 
 function createServiceError(status, msg, data) {
   const error = new Error(msg);
@@ -233,6 +267,747 @@ async function findStudentSubmission({
       },
     },
   });
+}
+
+function getHomeworkUploadPrefix(
+  taskId,
+  studentId,
+) {
+  return `homework-direct/${taskId}/${studentId}/`;
+}
+
+function normalizeDirectUploadFile(
+  file,
+  index,
+) {
+  const clientId = String(
+    file?.clientId || `file-${index + 1}`,
+  ).trim();
+
+  const originalName = String(
+    file?.name || "",
+  ).trim();
+
+  const size = Number(file?.size);
+
+  const extensionMatch =
+    originalName
+      .toLowerCase()
+      .match(/\.[a-z0-9]+$/);
+
+  const inferredType =
+    HOMEWORK_TYPE_BY_EXTENSION[
+      extensionMatch?.[0]
+    ];
+
+  const requestedType = String(
+    file?.contentType || "",
+  )
+    .trim()
+    .toLowerCase();
+
+  const contentType =
+    ALLOWED_HOMEWORK_MIME_TYPES.has(
+      requestedType,
+    )
+      ? requestedType
+      : inferredType;
+
+  if (!clientId || !originalName) {
+    throw createServiceError(
+      400,
+      "Every selected homework file must have a name.",
+    );
+  }
+
+  if (!contentType) {
+    throw createServiceError(
+      400,
+      `Unsupported homework file type: ${originalName}.`,
+    );
+  }
+
+  if (
+    !Number.isFinite(size) ||
+    size <= 0 ||
+    size > MAX_HOMEWORK_FILE_SIZE
+  ) {
+    throw createServiceError(
+      400,
+      `${originalName} must be larger than 0 bytes and no more than 50 MB.`,
+    );
+  }
+
+  return {
+    clientId,
+    originalName,
+    contentType,
+    size,
+  };
+}
+
+function normalizeDirectUploadFiles(files) {
+  if (
+    !Array.isArray(files) ||
+    !files.length
+  ) {
+    throw createServiceError(
+      400,
+      "Select at least one homework file.",
+    );
+  }
+
+  if (files.length > MAX_TOTAL_FILES) {
+    throw createServiceError(
+      400,
+      `You can prepare a maximum of ${MAX_TOTAL_FILES} files at once.`,
+    );
+  }
+
+  const normalized = files.map(
+    normalizeDirectUploadFile,
+  );
+
+  if (
+    new Set(
+      normalized.map((file) => file.clientId),
+    ).size !== normalized.length
+  ) {
+    throw createServiceError(
+      400,
+      "Each selected file must have a unique client ID.",
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeScopedObjectKeys({
+  uploads,
+  taskId,
+  studentId,
+}) {
+  if (
+    !Array.isArray(uploads) ||
+    !uploads.length ||
+    uploads.length > MAX_TOTAL_FILES
+  ) {
+    throw createServiceError(
+      400,
+      `Provide between 1 and ${MAX_TOTAL_FILES} uploaded files.`,
+    );
+  }
+
+  const requiredPrefix =
+    getHomeworkUploadPrefix(
+      taskId,
+      studentId,
+    );
+
+  const normalized = uploads.map(
+    (upload, index) => {
+      const objectKey =
+        storage.normalizeObjectKey(
+          upload?.objectKey,
+        );
+
+      if (
+        !objectKey.startsWith(
+          requiredPrefix,
+        )
+      ) {
+        throw createServiceError(
+          403,
+          "This uploaded file does not belong to the current student and task.",
+        );
+      }
+
+      return {
+        clientId: String(
+          upload?.clientId ||
+            `file-${index + 1}`,
+        ).trim(),
+        objectKey,
+      };
+    },
+  );
+
+  if (
+    new Set(
+      normalized.map(
+        (upload) => upload.objectKey,
+      ),
+    ).size !== normalized.length
+  ) {
+    throw createServiceError(
+      400,
+      "The same uploaded file cannot be confirmed twice.",
+    );
+  }
+
+  return normalized;
+}
+
+async function prepareHomeworkUploads({
+  taskId,
+  studentId,
+  files,
+}) {
+  const normalizedFiles =
+    normalizeDirectUploadFiles(files);
+
+  const task = await getTaskForStudent({
+    taskId,
+    studentId,
+  });
+
+  const modificationState =
+    getModificationState(task);
+
+  if (!modificationState.allowed) {
+    throw createServiceError(
+      400,
+      modificationState.message,
+    );
+  }
+
+  const submission =
+    await findStudentSubmission({
+      taskId,
+      studentId,
+    });
+
+  if (
+    submission &&
+    submission.grade !== null
+  ) {
+    throw createServiceError(
+      409,
+      "This homework has already been graded and can no longer be modified.",
+    );
+  }
+
+  const existingFileCount =
+    submission?.files?.length || 0;
+
+  if (
+    existingFileCount +
+      normalizedFiles.length >
+    MAX_TOTAL_FILES
+  ) {
+    throw createServiceError(
+      400,
+      `A homework submission may contain a maximum of ${MAX_TOTAL_FILES} files.`,
+      {
+        existingFileCount,
+        selectedFileCount:
+          normalizedFiles.length,
+      },
+    );
+  }
+
+  const folder =
+    `homework-direct/${taskId}/${studentId}`;
+
+  return Promise.all(
+    normalizedFiles.map(async (file) => {
+      const objectName =
+        storage.createObjectKey(
+          file.originalName,
+          folder,
+        );
+
+      const signed =
+        await storage.createPresignedUploadUrl({
+          objectName,
+          originalFilename:
+            file.originalName,
+          contentType:
+            file.contentType,
+          expiresInMinutes: 10,
+        });
+
+      return {
+        clientId: file.clientId,
+        objectKey: signed.objectName,
+        uploadUrl: signed.uploadUrl,
+        expiresInSeconds:
+          signed.expiresInSeconds,
+        contentType:
+          signed.contentType,
+        method: "PUT",
+        headers: {
+          "Content-Type":
+            signed.contentType,
+        },
+      };
+    }),
+  );
+}
+
+async function confirmHomeworkUploads({
+  taskId,
+  studentId,
+  uploads,
+}) {
+  const normalizedUploads =
+    normalizeScopedObjectKeys({
+      uploads,
+      taskId,
+      studentId,
+    });
+
+  const task = await getTaskForStudent({
+    taskId,
+    studentId,
+  });
+
+  let submission =
+    await findStudentSubmission({
+      taskId,
+      studentId,
+    });
+
+  if (
+    submission &&
+    submission.grade !== null
+  ) {
+    throw createServiceError(
+      409,
+      "This homework has already been graded and can no longer be modified.",
+    );
+  }
+
+  const existingByKey = new Map(
+    (submission?.files || []).map(
+      (file) => [file.objectKey, file],
+    ),
+  );
+
+  const newUploads =
+    normalizedUploads.filter(
+      (upload) =>
+        !existingByKey.has(
+          upload.objectKey,
+        ),
+    );
+
+  if (!newUploads.length) {
+    return {
+      submission:
+        await mapSubmission(submission),
+      confirmedFiles: [],
+    };
+  }
+
+  if (
+    (submission?.files?.length || 0) +
+      newUploads.length >
+    MAX_TOTAL_FILES
+  ) {
+    throw createServiceError(
+      400,
+      `A homework submission may contain a maximum of ${MAX_TOTAL_FILES} files.`,
+    );
+  }
+
+  const claimedElsewhere =
+    await prisma.submissionFile.findMany({
+      where: {
+        objectKey: {
+          in: newUploads.map(
+            (upload) => upload.objectKey,
+          ),
+        },
+      },
+      select: {
+        objectKey: true,
+      },
+    });
+
+  if (claimedElsewhere.length) {
+    throw createServiceError(
+      409,
+      "One or more uploaded files were already confirmed.",
+    );
+  }
+
+  const verifiedFiles =
+    await Promise.all(
+      newUploads.map(async (upload) => {
+        const metadata =
+          await storage.getFileMetadata(
+            upload.objectKey,
+          );
+
+        const validated =
+          normalizeDirectUploadFile(
+          {
+            clientId: upload.clientId,
+            name:
+              metadata.originalName ||
+              "homework-file",
+            contentType:
+              metadata.contentType,
+            size: metadata.size,
+          },
+          0,
+        );
+
+        return {
+          ...upload,
+          originalName:
+            validated.originalName,
+          contentType:
+            validated.contentType,
+          size: validated.size,
+          uploadedAt:
+            metadata.lastModified ||
+            new Date(),
+        };
+      }),
+    );
+
+  for (const file of verifiedFiles) {
+    const fileState =
+      getModificationState(
+        task,
+        new Date(file.uploadedAt),
+      );
+
+    if (!fileState.allowed) {
+      await Promise.allSettled(
+        verifiedFiles.map((item) =>
+          storage.deleteFile(
+            item.objectKey,
+          ),
+        ),
+      );
+
+      throw createServiceError(
+        400,
+        fileState.message,
+      );
+    }
+
+    file.uploadedAfterDeadline =
+      fileState.afterDeadline;
+  }
+
+  const highestExistingOrder =
+    (submission?.files || []).reduce(
+      (highest, file) =>
+        Math.max(
+          highest,
+          Number(file.order || 0),
+        ),
+      -1,
+    );
+
+  const latestUploadAt = new Date(
+    Math.max(
+      ...verifiedFiles.map((file) =>
+        new Date(file.uploadedAt).getTime(),
+      ),
+    ),
+  );
+
+  const firstUploadAt = new Date(
+    Math.min(
+      ...verifiedFiles.map((file) =>
+        new Date(file.uploadedAt).getTime(),
+      ),
+    ),
+  );
+
+  try {
+    submission = await prisma.$transaction(
+      async (tx) => {
+        let currentSubmission = submission;
+
+        if (!currentSubmission) {
+          currentSubmission =
+            await tx.submission.create({
+              data: {
+                taskId,
+                studentId,
+                firstSubmittedAt:
+                  firstUploadAt,
+                submittedAt:
+                  latestUploadAt,
+                lastModifiedAt:
+                  latestUploadAt,
+                lastModifiedAfterDeadline:
+                  verifiedFiles.some(
+                    (file) =>
+                      file.uploadedAfterDeadline,
+                  ),
+              },
+            });
+        } else {
+          currentSubmission =
+            await tx.submission.update({
+              where: {
+                id: currentSubmission.id,
+              },
+              data: {
+                submittedAt:
+                  latestUploadAt,
+                lastModifiedAt:
+                  latestUploadAt,
+                lastModifiedAfterDeadline:
+                  currentSubmission
+                    .lastModifiedAfterDeadline ||
+                  verifiedFiles.some(
+                    (file) =>
+                      file.uploadedAfterDeadline,
+                  ),
+              },
+            });
+        }
+
+        await Promise.all(
+          verifiedFiles.map(
+            (file, index) =>
+              tx.submissionFile.create({
+                data: {
+                  submissionId:
+                    currentSubmission.id,
+                  objectKey:
+                    file.objectKey,
+                  originalName:
+                    file.originalName,
+                  contentType:
+                    file.contentType,
+                  size: file.size,
+                  order:
+                    highestExistingOrder +
+                    index +
+                    1,
+                  uploadedAfterDeadline:
+                    file.uploadedAfterDeadline,
+                  uploadedAt:
+                    file.uploadedAt,
+                  uploadedById:
+                    studentId,
+                },
+              }),
+          ),
+        );
+
+        return tx.submission.findUnique({
+          where: {
+            id: currentSubmission.id,
+          },
+          include: {
+            files: {
+              orderBy: {
+                order: "asc",
+              },
+            },
+            correctedFiles: {
+              include: {
+                uploadedBy: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+              orderBy: {
+                order: "asc",
+              },
+            },
+            gradedBy: {
+              select: {
+                id: true,
+                name: true,
+                role: true,
+                isHeadAssistant: true,
+              },
+            },
+            task: {
+              select: {
+                id: true,
+                title: true,
+                deadline: true,
+                allowLateSubmission: true,
+                gradeOutOf: true,
+              },
+            },
+          },
+        });
+      },
+    );
+  } catch (error) {
+    await Promise.allSettled(
+      verifiedFiles.map((file) =>
+        storage.deleteFile(
+          file.objectKey,
+        ),
+      ),
+    );
+    throw error;
+  }
+
+  return {
+    submission:
+      await mapSubmission(submission),
+    confirmedFiles:
+      verifiedFiles.map((file) => ({
+        name: file.originalName,
+        contentType:
+          file.contentType,
+        size: file.size,
+      })),
+  };
+}
+
+async function abortHomeworkUploads({
+  taskId,
+  studentId,
+  objectKeys,
+}) {
+  await getTaskForStudent({
+    taskId,
+    studentId,
+  });
+
+  if (!Array.isArray(objectKeys)) {
+    throw createServiceError(
+      400,
+      "Uploaded file keys are required.",
+    );
+  }
+
+  const uploads = objectKeys.length
+    ? normalizeScopedObjectKeys({
+        uploads: objectKeys.map(
+          (objectKey) => ({ objectKey }),
+        ),
+        taskId,
+        studentId,
+      })
+    : [];
+
+  if (!uploads.length) {
+    return { removedCount: 0 };
+  }
+
+  const confirmed =
+    await prisma.submissionFile.findMany({
+      where: {
+        objectKey: {
+          in: uploads.map(
+            (upload) => upload.objectKey,
+          ),
+        },
+      },
+      select: {
+        objectKey: true,
+      },
+    });
+
+  const confirmedKeys = new Set(
+    confirmed.map((file) => file.objectKey),
+  );
+
+  const removable = uploads.filter(
+    (upload) =>
+      !confirmedKeys.has(upload.objectKey),
+  );
+
+  await Promise.allSettled(
+    removable.map((upload) =>
+      storage.deleteFile(upload.objectKey),
+    ),
+  );
+
+  return {
+    removedCount: removable.length,
+  };
+}
+
+async function cleanupAbandonedHomeworkUploads({
+  olderThanHours = 24,
+} = {}) {
+  const cutoff =
+    Date.now() -
+    Math.max(
+      1,
+      Number(olderThanHours) || 24,
+    ) *
+      60 *
+      60 *
+      1000;
+
+  const storedObjects =
+    await storage.listObjects(
+      "homework-direct/",
+    );
+
+  const candidates = storedObjects.filter(
+    (object) => {
+      const modifiedAt = new Date(
+        object.lastModified,
+      ).getTime();
+
+      return (
+        Number.isFinite(modifiedAt) &&
+        modifiedAt < cutoff
+      );
+    },
+  );
+
+  if (!candidates.length) {
+    return { removedCount: 0 };
+  }
+
+  const confirmedKeys = new Set();
+
+  for (
+    let index = 0;
+    index < candidates.length;
+    index += 200
+  ) {
+    const chunk = candidates.slice(
+      index,
+      index + 200,
+    );
+
+    const confirmed =
+      await prisma.submissionFile.findMany({
+        where: {
+          objectKey: {
+            in: chunk.map(
+              (item) => item.objectKey,
+            ),
+          },
+        },
+        select: {
+          objectKey: true,
+        },
+      });
+
+    confirmed.forEach((file) =>
+      confirmedKeys.add(file.objectKey),
+    );
+  }
+
+  const abandoned = candidates.filter(
+    (item) =>
+      !confirmedKeys.has(item.objectKey),
+  );
+
+  await Promise.allSettled(
+    abandoned.map((item) =>
+      storage.deleteFile(item.objectKey),
+    ),
+  );
+
+  return {
+    removedCount: abandoned.length,
+  };
 }
 
 async function submitHomework({
@@ -1694,6 +2469,10 @@ async function deleteCorrectedFile({
 
 module.exports = {
   submitHomework,
+  prepareHomeworkUploads,
+  confirmHomeworkUploads,
+  abortHomeworkUploads,
+  cleanupAbandonedHomeworkUploads,
   getMyHomeworkSubmission,
   deleteHomeworkFile,
   gradeSubmission,

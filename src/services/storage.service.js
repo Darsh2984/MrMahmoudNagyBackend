@@ -11,6 +11,7 @@ const {
   UploadPartCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
+  ListObjectsV2Command,
 } = require("@aws-sdk/client-s3");
 
 const {
@@ -356,7 +357,7 @@ async function createPresignedUploadUrl({
 
   const expiresInSeconds =
     Math.max(
-      60,
+      1,
       Math.min(
         Number(expiresInMinutes) || 60,
         60
@@ -795,7 +796,57 @@ async function getFileMetadata(objectName) {
         : null,
 
     originalName,
+
+    lastModified:
+      response.LastModified || null,
   };
+}
+
+async function listObjects(
+  prefix,
+) {
+  const normalizedPrefix = String(
+    prefix || "",
+  )
+    .replace(/^\/+/, "")
+    .replace(/\\/g, "/");
+
+  const objects = [];
+  let continuationToken;
+
+  do {
+    const response = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: normalizedPrefix,
+        ContinuationToken:
+          continuationToken,
+      }),
+    );
+
+    for (const item of response.Contents || []) {
+      if (!item.Key) {
+        continue;
+      }
+
+      objects.push({
+        objectKey: item.Key,
+        size:
+          typeof item.Size === "number"
+            ? item.Size
+            : null,
+        lastModified:
+          item.LastModified || null,
+      });
+    }
+
+    continuationToken =
+      response.IsTruncated
+        ? response.NextContinuationToken
+        : undefined;
+  } while (continuationToken);
+
+  return objects;
 }
 
 module.exports = {
@@ -812,4 +863,5 @@ module.exports = {
   getFileMetadata,
   fileExists,
   normalizeObjectKey,
+  listObjects,
 };

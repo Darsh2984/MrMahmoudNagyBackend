@@ -51,6 +51,98 @@ async function submitHomework(
   }
 }
 
+async function prepareHomeworkUploads(
+  req,
+  res,
+) {
+  try {
+    const uploads =
+      await submissionService.prepareHomeworkUploads({
+        taskId: req.params.taskId,
+        studentId: req.user.id,
+        files: req.body.files,
+      });
+
+    req.activityFiles = (req.body.files || []).map(
+      (file) => ({
+        originalname: file.name,
+        mimetype: file.contentType,
+        size: file.size,
+        fieldname: "direct-upload",
+      }),
+    );
+
+    return res.json({
+      msg: "Secure homework upload prepared.",
+      uploads,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error preparing homework upload.",
+    );
+  }
+}
+
+async function confirmHomeworkUploads(
+  req,
+  res,
+) {
+  try {
+    const result =
+      await submissionService.confirmHomeworkUploads({
+        taskId: req.params.taskId,
+        studentId: req.user.id,
+        uploads: req.body.uploads,
+      });
+
+    req.activityFiles =
+      result.confirmedFiles.map((file) => ({
+        originalname: file.name,
+        mimetype: file.contentType,
+        size: file.size,
+        fieldname: "direct-upload",
+      }));
+
+    return res.status(201).json({
+      msg: "Homework files uploaded successfully.",
+      submission: result.submission,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error confirming homework upload.",
+    );
+  }
+}
+
+async function abortHomeworkUploads(
+  req,
+  res,
+) {
+  try {
+    const result =
+      await submissionService.abortHomeworkUploads({
+        taskId: req.params.taskId,
+        studentId: req.user.id,
+        objectKeys: req.body.objectKeys,
+      });
+
+    return res.json({
+      msg: "Unfinished homework upload removed.",
+      ...result,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error cancelling homework upload.",
+    );
+  }
+}
+
 async function getMyHomeworkSubmission(
   req,
   res,
@@ -227,6 +319,9 @@ async function getGradingHistory(
 
 module.exports = {
   submitHomework,
+  prepareHomeworkUploads,
+  confirmHomeworkUploads,
+  abortHomeworkUploads,
   getMyHomeworkSubmission,
   deleteHomeworkFile,
   gradeSubmission,

@@ -16,8 +16,13 @@ const studentSupportChatService = require(
   "./services/studentSupportChat.service"
 );
 const { Server } = require("socket.io");
+const cron = require("node-cron");
 
 dotenv.config();
+
+const submissionService = require(
+  "./services/submission.service",
+);
 
 const authenticate = require("./middleware/auth.middleware");
 const studentActivityLog = require("./middleware/studentActivityLog.middleware");
@@ -57,6 +62,24 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: process.env.FRONTEND_URL || "*" } });
 app.set("io", io);
+
+cron.schedule("17 * * * *", async () => {
+  try {
+    const result =
+      await submissionService.cleanupAbandonedHomeworkUploads();
+
+    if (result.removedCount > 0) {
+      console.log(
+        `Removed ${result.removedCount} abandoned homework upload(s).`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Abandoned homework upload cleanup failed:",
+      error.message,
+    );
+  }
+});
 
 app.use(cors());
 app.use(express.json());

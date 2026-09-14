@@ -26,6 +26,24 @@ router.post(
   submissionController.submitHomework,
 );
 
+router.post(
+  "/task/:taskId/uploads/prepare",
+  requireRole("STUDENT"),
+  submissionController.prepareHomeworkUploads,
+);
+
+router.post(
+  "/task/:taskId/uploads/confirm",
+  requireRole("STUDENT"),
+  submissionController.confirmHomeworkUploads,
+);
+
+router.post(
+  "/task/:taskId/uploads/abort",
+  requireRole("STUDENT"),
+  submissionController.abortHomeworkUploads,
+);
+
 router.get(
   "/task/:taskId/mine",
   requireRole("STUDENT"),
