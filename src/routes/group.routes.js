@@ -7,9 +7,8 @@ const { requireAuth, requireAdminLevel, requireRole } = require("../middleware/r
 router.get("/year/:yearId", requireAuth, groupController.listGroupsByYear);
 router.get("/:groupId", requireAuth, groupController.getGroup);
 
-// Writes — group management is Teacher/Head only (not a per-assistant-permission thing,
-// since groups define the org structure itself, not day-to-day content)
-router.post("/", requireAdminLevel, groupController.createGroup);
+// Assistants may create groups; other group management remains Teacher/Head only.
+router.post("/", requireRole("TEACHER", "ASSISTANT"), groupController.createGroup);
 router.patch("/:groupId/session-link",requireAdminLevel,groupController.updateSessionLink);
 router.patch("/:groupId", requireAdminLevel, groupController.updateGroup);
 router.delete("/:groupId", requireAdminLevel, groupController.deleteGroup);

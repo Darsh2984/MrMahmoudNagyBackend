@@ -1,7 +1,18 @@
 const prisma = require("../config/prisma");
 const studentSupportChatService = require("./studentSupportChat.service");
+const { resolveTeacherId } = require("../utils/resolveTeacher");
 
-async function createGroup({ name, yearId }) {
+async function createGroup({ name, yearId }, creator) {
+  if (!creator || !["TEACHER", "ASSISTANT"].includes(creator.role)) {
+    throw { status: 403, msg: "Teacher or Assistant only" };
+  }
+
+  const normalizedName = typeof name === "string" ? name.trim() : "";
+  if (!normalizedName || typeof yearId !== "string" || !yearId.trim()) {
+    throw { status: 400, msg: "Group name and academic year are required" };
+  }
+
+  const teacherId = await resolveTeacherId(creator);
   const year = await prisma.year.findUnique({
     where: {
       id: yearId,
@@ -15,10 +26,17 @@ async function createGroup({ name, yearId }) {
     };
   }
 
+  if (year.teacherId !== teacherId) {
+    throw { status: 403, msg: "You cannot create groups in this academic year" };
+  }
+
   return prisma.group.create({
     data: {
-      name,
+      name: normalizedName,
       yearId,
+      ...(creator.role === "ASSISTANT" && !creator.isHeadAssistant
+        ? { assistantAssignments: { create: { assistantId: creator.id } } }
+        : {}),
     },
   });
 }

@@ -2,7 +2,7 @@ const groupService = require("../services/group.service");
 
 async function createGroup(req, res) {
   try {
-    const group = await groupService.createGroup(req.body);
+    const group = await groupService.createGroup(req.body, req.user);
     res.json({ msg: "Group created", group });
   } catch (err) {
     res.status(err.status || 500).json({ msg: err.msg || "Error creating group" });

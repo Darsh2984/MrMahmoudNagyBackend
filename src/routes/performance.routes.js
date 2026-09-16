@@ -3,13 +3,13 @@ const router = express.Router();
 const controller = require("../controllers/performance.controller");
 const {
   requireAuth,
-  requireAdminLevel,
+  requireRole,
 } = require("../middleware/rbac.middleware");
 
 // Static routes must come before parameterized routes.
 router.get(
   "/export/:groupId",
-  requireAdminLevel,
+  requireRole("TEACHER", "ASSISTANT"),
   controller.exportGroupPerformance
 );
 

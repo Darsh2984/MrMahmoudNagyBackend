@@ -1,4 +1,5 @@
 const performanceService = require("../services/performance.service");
+const groupService = require("../services/group.service");
 
 async function getStudentPerformance(req, res) {
   try {
@@ -11,6 +12,7 @@ async function getStudentPerformance(req, res) {
 
 async function exportGroupPerformance(req, res) {
   try {
+    await groupService.getGroupWithMembers(req.params.groupId, req.user);
     const { workbook, groupName } = await performanceService.exportGroupPerformanceWorkbook(req.params.groupId);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=${groupName}_performance.xlsx`);
