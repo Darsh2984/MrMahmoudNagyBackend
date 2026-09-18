@@ -865,6 +865,7 @@ model Task {
 
   groups      TaskGroup[]
   submissions Submission[]
+  aiGradingPacks TaskAIGradingPack[]
 }
 
 model TaskGroup {
@@ -919,6 +920,7 @@ model Submission {
   delegationHistory SubmissionDelegationHistory[]
 
   gradingHistory HomeworkGradingHistory[]
+  aiCorrections SubmissionAICorrection[]
 
   @@unique([taskId, studentId])
   @@index([taskId])
@@ -926,6 +928,61 @@ model Submission {
   @@index([gradedAt])
   @@index([gradedById])
   @@index([lastModifiedAfterDeadline])
+}
+
+// Private staff-only AI marking references and suggestions. Never student grades.
+model TaskAIGradingPack {
+  id String @id @default(uuid())
+  taskId String
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sourceHash String
+  questionPaperKey String
+  questionPaperName String
+  markSchemeKey String
+  markSchemeName String
+  rubric Json?
+  status String @default("PROCESSING")
+  error String?
+  model String
+  uploadedById String
+  uploadedByName String
+  approvedAt DateTime?
+  approvedById String?
+  approvedByName String?
+  cacheName String?
+  cacheModel String?
+  cacheExpiresAt DateTime?
+  cacheRetryAfter DateTime?
+  usage Json?
+  createdAt DateTime @default(now())
+  activatedAt DateTime @default(now())
+  corrections SubmissionAICorrection[]
+
+  @@unique([taskId, sourceHash])
+  @@index([taskId, activatedAt])
+}
+
+model SubmissionAICorrection {
+  id String @id @default(uuid())
+  submissionId String
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  packId String
+  pack TaskAIGradingPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  inputFingerprint String
+  submissionVersion String
+  inputFiles Json
+  status String @default("PROCESSING")
+  result Json?
+  error String?
+  model String
+  generatedById String
+  generatedByName String
+  usage Json?
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+
+  @@unique([submissionId, inputFingerprint])
+  @@index([submissionId, createdAt])
 }
 
 model SubmissionFile {
