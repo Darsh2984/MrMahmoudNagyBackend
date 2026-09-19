@@ -8,6 +8,12 @@ const {
 
 // Static routes must come before parameterized routes.
 router.get(
+  "/export/reports/:groupId",
+  requireRole("TEACHER", "ASSISTANT"),
+  controller.exportStudentReports
+);
+
+router.get(
   "/export/:groupId",
   requireRole("TEACHER", "ASSISTANT"),
   controller.exportGroupPerformance

@@ -524,7 +524,7 @@ async function prepareHomeworkUploads({
             file.originalName,
           contentType:
             file.contentType,
-          expiresInMinutes: 10,
+          expiresInMinutes: 30,
         });
 
       return {
