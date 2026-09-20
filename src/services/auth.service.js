@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const prisma = require("../config/prisma");
 const transporter = require("../config/nodemailer");
 const { generateAccessCode } = require("../utils/accessCode");
+const { renderEmail } = require("../utils/emailTemplate");
 const performanceService = require("./performance.service");
 
 const SALT_ROUNDS = 10;
@@ -320,105 +321,17 @@ async function forgotPassword(email) {
         "If you did not request this reset, you can ignore this email.",
       ].join("\n"),
 
-      html: `
-        <!doctype html>
-        <html lang="en">
-          <head>
-            <meta charset="utf-8" />
-            <meta
-              name="viewport"
-              content="width=device-width, initial-scale=1"
-            />
-          </head>
-
-          <body
-            style="
-              margin: 0;
-              padding: 24px;
-              background: #f5f7fb;
-              font-family: Arial, sans-serif;
-              color: #1f2937;
-            "
-          >
-            <div
-              style="
-                max-width: 560px;
-                margin: 0 auto;
-                padding: 32px;
-                background: #ffffff;
-                border: 1px solid #e5e7eb;
-                border-radius: 16px;
-              "
-            >
-              <h1
-                style="
-                  margin: 0 0 16px;
-                  font-size: 24px;
-                "
-              >
-                Reset your password
-              </h1>
-
-              <p
-                style="
-                  margin: 0 0 14px;
-                  line-height: 1.6;
-                "
-              >
-                Hello ${user.name || "there"},
-              </p>
-
-              <p
-                style="
-                  margin: 0 0 22px;
-                  line-height: 1.6;
-                "
-              >
-                We received a request to reset your
-                Mahmoud Nagy Platform password.
-              </p>
-
-              <a
-                href="${resetUrl}"
-                style="
-                  display: inline-block;
-                  padding: 13px 22px;
-                  border-radius: 10px;
-                  background: #153e75;
-                  color: #ffffff;
-                  text-decoration: none;
-                  font-weight: 700;
-                "
-              >
-                Reset password
-              </a>
-
-              <p
-                style="
-                  margin: 22px 0 0;
-                  line-height: 1.6;
-                  color: #6b7280;
-                "
-              >
-                This link expires in
-                ${PASSWORD_RESET_EXPIRY_MINUTES} minutes
-                and can only be used once.
-              </p>
-
-              <p
-                style="
-                  margin: 14px 0 0;
-                  line-height: 1.6;
-                  color: #6b7280;
-                "
-              >
-                If you did not request this reset,
-                you can safely ignore this email.
-              </p>
-            </div>
-          </body>
-        </html>
-      `,
+      html: renderEmail({
+        preview: "Use this secure link to reset your password. It expires in 15 minutes.",
+        eyebrow: "Account security",
+        title: "Reset your password",
+        name: user.name,
+        message: "We received a request to reset your Mahmoud Nagy Platform password. Use the button below to choose a new password.",
+        buttonLabel: "Reset password",
+        buttonUrl: resetUrl,
+        expiresInMinutes: PASSWORD_RESET_EXPIRY_MINUTES,
+        securityNote: "If you did not request a password reset, you can safely ignore this email. Your current password has not changed.",
+      }),
     });
   } catch (emailError) {
     /*

@@ -3,6 +3,7 @@ const crypto = require("crypto");
 const prisma = require("../config/prisma");
 const transporter = require("../config/nodemailer");
 const { generateAccessCode } = require("../utils/accessCode");
+const { renderEmail } = require("../utils/emailTemplate");
 
 const EXPIRY_MINUTES = 30;
 const RESEND_COOLDOWN_MS = 60_000;
@@ -41,18 +42,23 @@ async function sendVerification(email, name, secret) {
     throw serviceError(500, "Email delivery is not configured.");
   }
   await transporter.sendMail({
-    from,
+    from: { name: "Mahmoud Nagy Platform", address: from },
     to: email,
     subject: "Verify your Mahmoud Nagy student email",
     text: `Hello ${name},\n\nFinish your student registration using this link:\n${url}\n\nOr enter this code on the registration page: ${secret.code}\n\nThe link and code expire in ${EXPIRY_MINUTES} minutes. If you did not request this, ignore this email.`,
-    html: `<p>Hello ${escapeHtml(name)},</p><p>Finish your student registration by <a href="${escapeHtml(url)}">verifying your email</a>.</p><p>Or enter this code on the registration page: <strong>${secret.code}</strong></p><p>The link and code expire in ${EXPIRY_MINUTES} minutes. If you did not request this, ignore this email.</p>`,
+    html: renderEmail({
+      preview: "Your verification code and link are inside. Complete your registration in 30 minutes.",
+      eyebrow: "Student registration",
+      title: "Verify your email",
+      name,
+      message: "You are one step away from creating your student account. Confirm this email address using the button below, or enter the code on the registration page.",
+      buttonLabel: "Verify email address",
+      buttonUrl: url,
+      code: secret.code,
+      expiresInMinutes: EXPIRY_MINUTES,
+      securityNote: "If you did not start this registration, you can safely ignore this email. No account will be created.",
+    }),
   });
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character]);
 }
 
 async function validateDetails(input) {
