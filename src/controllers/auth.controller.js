@@ -1,17 +1,13 @@
 const authService = require("../services/auth.service");
+const studentRegistrationService = require("../services/studentRegistration.service");
 
 async function registerStudent(req, res) {
   try {
-    const user = await authService.registerStudent(req.body);
+    const result = await authService.registerStudent(req.body);
 
     res.json({
-      msg: "Student registered",
-      user: {
-        id: user.id,
-        name: user.name,
-        accessCode: user.accessCode,
-        desiredYear: user.desiredYear || null,
-      },
+      msg: "Check your email for a verification link or code.",
+      ...result,
     });
   } catch (err) {
     res
@@ -21,6 +17,24 @@ async function registerStudent(req, res) {
           err.msg ||
           "Error registering student",
       });
+  }
+}
+
+async function verifyStudentEmail(req, res) {
+  try {
+    const user = await studentRegistrationService.verifyStudentEmail(req.body);
+    res.json({ msg: "Email verified. Your account is ready.", user });
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Could not verify email." });
+  }
+}
+
+async function resendStudentVerification(req, res) {
+  try {
+    const result = await studentRegistrationService.resendVerification(req.body);
+    res.json({ msg: "If registration is pending, check your inbox. Please wait one minute between requests.", ...result });
+  } catch (err) {
+    res.status(err.status || 500).json({ msg: err.msg || "Could not send verification email." });
   }
 }
 
@@ -288,6 +302,8 @@ async function deleteAssistant(req, res) {
 }
 module.exports = {
   registerStudent,
+  verifyStudentEmail,
+  resendStudentVerification,
   listRegistrationYears,
   createAssistant,
   promoteToHead,

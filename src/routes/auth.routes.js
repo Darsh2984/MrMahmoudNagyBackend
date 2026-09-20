@@ -20,6 +20,9 @@ router.post(
   authController.registerStudent
 );
 
+router.post("/verify-student-email", authController.verifyStudentEmail);
+router.post("/resend-student-verification", authController.resendStudentVerification);
+
 router.post("/login", authController.login);
 
 router.get(
