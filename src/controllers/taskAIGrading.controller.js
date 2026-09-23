@@ -52,7 +52,7 @@ async function exportCorrectionPdf(req, res) {
     const pdf = await pdfService.createCorrectionPdf(data);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Length", pdf.body.length);
-    res.setHeader("Content-Disposition", `attachment; filename="ai-grading-review.pdf"; filename*=UTF-8''${encodeURIComponent(pdf.fileName)}`);
+    res.setHeader("Content-Disposition", `attachment; filename="corrected-submission.pdf"; filename*=UTF-8''${encodeURIComponent(pdf.fileName)}`);
     return res.end(pdf.body);
   } catch (error) {
     console.error("AI grading PDF export failed:", error);

@@ -99,10 +99,10 @@ async function createCorrectionPdf({ correction, submission }) {
   function newPage() {
     page = document.addPage([WIDTH, HEIGHT]);
     page.drawRectangle({ x: 0, y: HEIGHT - 16, width: WIDTH, height: 16, color: NAVY });
-    drawDirectionalText(page, "NAGY'S MIND", MARGIN, HEIGHT - 49, 12, bold, NAVY, CONTENT_WIDTH);
-    drawDirectionalText(page, "CONFIRMED AI GRADING REVIEW", MARGIN, HEIGHT - 66, 8, regular, TEAL, CONTENT_WIDTH);
+    drawDirectionalText(page, "MAHMOUD NAGY'S TEAM", MARGIN, HEIGHT - 49, 12, bold, NAVY, CONTENT_WIDTH);
+    drawDirectionalText(page, "CORRECTION REPORT", MARGIN, HEIGHT - 66, 8, regular, TEAL, CONTENT_WIDTH);
     page.drawLine({ start: { x: MARGIN, y: 46 }, end: { x: WIDTH - MARGIN, y: 46 }, thickness: 0.7, color: BORDER });
-    drawDirectionalText(page, "Private staff document - not published to the student", MARGIN, 29, 7, regular, MUTED, CONTENT_WIDTH);
+    drawDirectionalText(page, "Mahmoud Nagy's Team - Student correction report", MARGIN, 29, 7, regular, MUTED, CONTENT_WIDTH);
     drawDirectionalText(page, `Page ${document.getPageCount()}`, WIDTH - MARGIN - 48, 29, 7, bold, MUTED, 48);
     y = HEIGHT - 91;
   }
@@ -162,7 +162,6 @@ async function createCorrectionPdf({ correction, submission }) {
     if (question.needsTeacherReview) paragraph("Marked for additional human review", { bold: true, size: 8.5, color: WARNING, after: 3 });
     paragraph("What the student wrote", { bold: true, size: 8.5, color: TEAL, after: 1 });
     paragraph(question.studentAnswer, { size: 8.5, lineHeight: 13 });
-    list("Evidence references", question.pageReferences);
     list("Marks awarded for", question.awardedFor);
     list("Marks deducted or missing for", question.deductedFor);
     paragraph("Feedback", { bold: true, size: 8.5, color: TEAL, after: 1 });
@@ -173,12 +172,9 @@ async function createCorrectionPdf({ correction, submission }) {
   paragraph(result.overallFeedback);
   list("Strengths", result.strengths);
   list("Areas to improve", result.weaknesses);
-  heading("Private staff notes");
-  paragraph(result.teacherNotes || "No private notes.");
-
   return {
     body: Buffer.from(await document.save()),
-    fileName: `${safeFileName(submission.student.name)} - ${safeFileName(submission.task.title)} - AI Grading Review.pdf`,
+    fileName: `${safeFileName(submission.student.name)} - ${safeFileName(submission.task.title)} - Corrected.pdf`,
   };
 }
 

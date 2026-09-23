@@ -206,7 +206,7 @@ function drawText(page, value, x, y, size, font, color, maxWidth) {
 
 function drawPageBase(page, fonts, pageNo) {
   page.drawRectangle({ x: 0, y: PAGE_HEIGHT - 16, width: PAGE_WIDTH, height: 16, color: NAVY });
-  drawText(page, "NAGY'S MIND", MARGIN, PAGE_HEIGHT - 54, 12, fonts.bold, NAVY);
+  drawText(page, "MAHMOUD NAGY'S TEAM", MARGIN, PAGE_HEIGHT - 54, 12, fonts.bold, NAVY);
   drawText(page, "STUDENT PERFORMANCE REPORT", MARGIN, PAGE_HEIGHT - 72, 8, fonts.regular, TEAL);
   page.drawLine({ start: { x: MARGIN, y: 46 }, end: { x: PAGE_WIDTH - MARGIN, y: 46 }, thickness: 0.7, color: BORDER });
   drawText(page, "Confidential - for staff and family review", MARGIN, 30, 7, fonts.regular, MUTED);
@@ -317,7 +317,7 @@ async function createStudentReportPdf(report) {
   })));
 
   document.setTitle(`${report.student.name} - Report - ${report.period.startDate} to ${report.period.endDate}`);
-  document.setAuthor("Nagy's Mind");
+  document.setAuthor("Mahmoud Nagy's Team");
   document.setSubject("Student performance report");
   return Buffer.from(await document.save());
 }
