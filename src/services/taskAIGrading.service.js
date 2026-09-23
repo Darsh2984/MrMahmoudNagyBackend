@@ -3,7 +3,6 @@ const fs = require("fs/promises");
 const { PDFDocument } = require("pdf-lib");
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
-const { resolveTeacherId } = require("../utils/resolveTeacher");
 const { rubricSchema, correctionSchema, validateRubric, validateCorrection } = require("./taskAIGrading.validation");
 const { answerMimeType, detectAnswerMimeType } = require("./taskAIGrading.media");
 
@@ -27,9 +26,7 @@ async function assertTaskAccess(taskId, user) {
   if (!["TEACHER", "ASSISTANT"].includes(user.role)) fail(403, "AI grading is private to teaching staff.");
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: { groups: true } });
   if (!task) fail(404, "Task not found.");
-  if (isAdmin(user)) {
-    if (task.teacherId !== await resolveTeacherId(user)) fail(403, "You do not have access to this task.");
-  } else {
+  if (!isAdmin(user)) {
     const count = await prisma.assistantGroupAssignment.count({
       where: { assistantId: user.id, groupId: { in: task.groups.map(item => item.groupId) } },
     });

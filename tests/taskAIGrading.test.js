@@ -78,12 +78,12 @@ function mock(path, exports) {
 }
 mock("../src/config/prisma", prisma);
 mock("../src/services/storage.service", { getSignedUrl: async () => "signed-staff-only-url" });
-mock("../src/utils/resolveTeacher", { resolveTeacherId: async user => user.role === "TEACHER" ? user.id : "teacher" });
 const service = require("../src/services/taskAIGrading.service");
 const assistant = { id: "assistant", name: "Assistant", role: "ASSISTANT" };
-test("students and unrelated teachers cannot access task AI references", async () => {
+test("students are blocked while teachers and head assistants can access every task", async () => {
   await assert.rejects(service.assertTaskAccess("task", { id: "student", role: "STUDENT" }), error => error.status === 403);
-  await assert.rejects(service.assertTaskAccess("task", { id: "other", role: "TEACHER" }), error => error.status === 403);
+  await assert.doesNotReject(service.assertTaskAccess("task", { id: "main-teacher", role: "TEACHER" }));
+  await assert.doesNotReject(service.assertTaskAccess("task", { id: "head", role: "ASSISTANT", isHeadAssistant: true }));
 });
 test("regular assistants require group assignment and submission delegation", async () => {
   assigned = 0;

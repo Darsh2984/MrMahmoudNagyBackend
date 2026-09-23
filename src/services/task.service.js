@@ -340,6 +340,31 @@ async function listTasksForGroup(groupId, user) {
         gradedAt: true,
       },
     };
+  } else if (isAdminLevel(user)) {
+    include.submissions = {
+      where: {
+        grade: null,
+        delegation: null,
+      },
+      select: {
+        id: true,
+        submittedAt: true,
+        student: {
+          select: {
+            id: true,
+            name: true,
+            groupMemberships: {
+              select: {
+                groupId: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        submittedAt: "asc",
+      },
+    };
   }
 
   return prisma.task.findMany({
