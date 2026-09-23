@@ -15,7 +15,6 @@ const INK = rgb(0.13, 0.21, 0.27);
 const MUTED = rgb(0.42, 0.49, 0.53);
 const PALE = rgb(0.94, 0.97, 0.97);
 const BORDER = rgb(0.86, 0.91, 0.92);
-const WARNING = rgb(0.72, 0.42, 0.03);
 
 function clean(value) {
   return String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
@@ -159,7 +158,6 @@ async function createCorrectionPdf({ correction, submission }) {
   for (const question of result.questionBreakdown) {
     ensure(70);
     paragraph(`${question.question} - ${question.awarded} / ${question.possible} marks`, { bold: true, size: 11, color: NAVY, after: 2 });
-    if (question.needsTeacherReview) paragraph("Marked for additional human review", { bold: true, size: 8.5, color: WARNING, after: 3 });
     paragraph("What the student wrote", { bold: true, size: 8.5, color: TEAL, after: 1 });
     paragraph(question.studentAnswer, { size: 8.5, lineHeight: 13 });
     list("Marks awarded for", question.awardedFor);
