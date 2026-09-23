@@ -352,4 +352,106 @@ async function gradeAnswers(correctionId) {
     if (ai) await Promise.allSettled(names.map(name => ai.files.delete({ name })));
   }
 }
-module.exports = { assertTaskAccess, getTaskPack, uploadTaskPack, retryPack, approvePack, listCorrections, startCorrection, submissionVersion };
+
+async function correctionForReview(submissionId, correctionId, user) {
+  await assertSubmissionAccess(submissionId, user);
+  const correction = await prisma.submissionAICorrection.findFirst({
+    where: { id: correctionId, submissionId },
+    include: { pack: true },
+  });
+  if (!correction) fail(404, "AI correction not found.");
+  if (correction.status !== "COMPLETED" || !correction.result) {
+    fail(409, "Only a completed AI correction can be reviewed.");
+  }
+  return correction;
+}
+
+function validateStaffResult(value, rubric) {
+  try {
+    return validateCorrection(value, rubric);
+  } catch (error) {
+    fail(400, String(error.message || "The reviewed result is invalid.").replace(/^AI returned/i, "The reviewed result contains"));
+  }
+}
+
+async function saveCorrectionReview(submissionId, correctionId, user, value) {
+  const correction = await correctionForReview(submissionId, correctionId, user);
+  if (correction.confirmedAt) {
+    fail(409, "This reviewed result is confirmed and locked. Reopen it before editing.");
+  }
+  const reviewedResult = validateStaffResult(value, correction.pack.rubric);
+  await prisma.submissionAICorrection.update({
+    where: { id: correction.id },
+    data: {
+      reviewedResult,
+      reviewedAt: new Date(),
+      reviewedById: user.id,
+      reviewedByName: user.name,
+    },
+  });
+  return listCorrections(submissionId, user);
+}
+
+async function confirmCorrectionReview(submissionId, correctionId, user) {
+  const correction = await correctionForReview(submissionId, correctionId, user);
+  if (correction.confirmedAt) return listCorrections(submissionId, user);
+  const reviewedResult = validateStaffResult(correction.reviewedResult || correction.result, correction.pack.rubric);
+  const now = new Date();
+  await prisma.submissionAICorrection.update({
+    where: { id: correction.id },
+    data: {
+      reviewedResult,
+      reviewedAt: correction.reviewedAt || now,
+      reviewedById: correction.reviewedById || user.id,
+      reviewedByName: correction.reviewedByName || user.name,
+      confirmedAt: now,
+      confirmedById: user.id,
+      confirmedByName: user.name,
+    },
+  });
+  return listCorrections(submissionId, user);
+}
+
+async function reopenCorrectionReview(submissionId, correctionId, user) {
+  const correction = await correctionForReview(submissionId, correctionId, user);
+  if (!correction.confirmedAt) return listCorrections(submissionId, user);
+  await prisma.submissionAICorrection.update({
+    where: { id: correction.id },
+    data: {
+      confirmedAt: null,
+      confirmedById: null,
+      confirmedByName: null,
+    },
+  });
+  return listCorrections(submissionId, user);
+}
+
+async function confirmedCorrectionForExport(submissionId, correctionId, user) {
+  const correction = await correctionForReview(submissionId, correctionId, user);
+  if (!correction.confirmedAt || !correction.reviewedResult) {
+    fail(409, "Confirm the reviewed AI result before exporting it.");
+  }
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: {
+      student: { select: { id: true, name: true, email: true } },
+      task: { select: { id: true, title: true, gradeOutOf: true, deadline: true } },
+    },
+  });
+  return { correction, submission };
+}
+
+module.exports = {
+  assertTaskAccess,
+  getTaskPack,
+  uploadTaskPack,
+  retryPack,
+  approvePack,
+  listCorrections,
+  startCorrection,
+  saveCorrectionReview,
+  confirmCorrectionReview,
+  reopenCorrectionReview,
+  confirmedCorrectionForExport,
+  submissionVersion,
+};

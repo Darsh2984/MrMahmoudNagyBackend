@@ -1,0 +1,9 @@
+ALTER TABLE "SubmissionAICorrection"
+ADD COLUMN "reviewedResult" JSONB,
+ADD COLUMN "reviewedAt" TIMESTAMP(3),
+ADD COLUMN "reviewedById" TEXT,
+ADD COLUMN "reviewedByName" TEXT,
+ADD COLUMN "confirmedAt" TIMESTAMP(3),
+ADD COLUMN "confirmedById" TEXT,
+ADD COLUMN "confirmedByName" TEXT,
+ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

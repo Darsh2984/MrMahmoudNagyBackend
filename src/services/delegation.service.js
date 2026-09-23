@@ -5,6 +5,7 @@ const {
 } = require("./notification.service");
 
 const MAX_BULK_SUBMISSIONS = 100;
+const BULK_DELEGATION_CONCURRENCY = 5;
 
 function createServiceError(
   status,
@@ -716,40 +717,73 @@ async function bulkDelegateSubmissions({
   const successful = [];
   const failed = [];
 
-  for (const submissionId of uniqueSubmissionIds) {
-    try {
-      const delegation =
-        await delegateSubmission({
-          submissionId,
-          assistantId,
-          delegatedById,
-          reason,
+  for (
+    let index = 0;
+    index < uniqueSubmissionIds.length;
+    index += BULK_DELEGATION_CONCURRENCY
+  ) {
+    const batch = uniqueSubmissionIds.slice(
+      index,
+      index + BULK_DELEGATION_CONCURRENCY,
+    );
+
+    const results = await Promise.all(
+      batch.map(async (submissionId) => {
+        try {
+          const delegation =
+            await delegateSubmission({
+              submissionId,
+              assistantId,
+              delegatedById,
+              reason,
+            });
+
+          return {
+            ok: true,
+            submissionId,
+            delegation,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            submissionId,
+            error,
+          };
+        }
+      }),
+    );
+
+    for (const result of results) {
+      if (result.ok) {
+        successful.push({
+          submissionId:
+            result.submissionId,
+
+          delegationId:
+            result.delegation.id,
+
+          assistantId:
+            result.delegation.assistantId,
+
+          assistantName:
+            result.delegation.assistant
+              ?.name ||
+            null,
         });
 
-      successful.push({
-        submissionId,
+        continue;
+      }
 
-        delegationId:
-          delegation.id,
-
-        assistantId:
-          delegation.assistantId,
-
-        assistantName:
-          delegation.assistant
-            ?.name ||
-          null,
-      });
-    } catch (error) {
       failed.push({
-        submissionId,
+        submissionId:
+          result.submissionId,
 
         status:
-          error?.status || 500,
+          result.error?.status || 500,
 
         message:
-          error?.msg ||
-          error?.message ||
+          result.error?.msg ||
+          result.error?.message ||
           "Delegation failed.",
       });
     }

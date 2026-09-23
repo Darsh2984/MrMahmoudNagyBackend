@@ -37,7 +37,11 @@ and cached input still have costs: do not treat caching as free or permanent.
 5. Reopening the panel loads saved corrections. Identical inputs reuse a saved
    correction without another AI call. Changed documents/answers create a new
    correction; previous records remain visible and are marked outdated.
-6. AI suggestions never modify the student's grade/comments, returned files,
+6. Edit the saved AI result question by question, including marks, evidence,
+   deductions and feedback. Save it as a reviewed draft, then confirm it. A
+   confirmed result is locked and can be exported as a staff-only PDF; reopen it
+   if another edit is required. The original AI result remains preserved.
+7. AI suggestions and confirmed reviews never modify the student's grade/comments, returned files,
    grading history, delegation completion, or notifications. Annotate the PDF
    manually and publish through the existing grading form.
 

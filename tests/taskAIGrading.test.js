@@ -58,6 +58,7 @@ const submission = () => ({ id: "submission", taskId: "task", files: [
 ], delegation });
 let savedCorrections = [];
 let extraFiles = [];
+let reviewCorrection = null;
 const prisma = {
   task: { findUnique: async () => ({ id: "task", teacherId: "teacher", groups: [{ groupId: "group" }] }) },
   assistantGroupAssignment: { count: async () => assigned },
@@ -67,6 +68,8 @@ const prisma = {
     updateMany: async () => ({ count: 0 }), findMany: async () => savedCorrections,
     create: async () => { throw Object.assign(new Error("Existing"), { code: "P2002" }); },
     findUnique: async () => savedCorrections[0],
+    findFirst: async () => reviewCorrection,
+    update: async ({ data }) => Object.assign(reviewCorrection, data),
   },
 };
 function mock(path, exports) {
@@ -140,4 +143,35 @@ test("mixed multi-file submissions list PDFs and images but exclude Office files
     if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = oldKey;
   }
+});
+
+test("staff can edit, confirm, lock and reopen a completed AI correction", async () => {
+  reviewCorrection = {
+    id: "review",
+    submissionId: "submission",
+    packId: "pack",
+    pack: activePack,
+    status: "COMPLETED",
+    result: validateCorrection(result(), rubric),
+    inputFiles: [],
+    submissionVersion: service.submissionVersion(submission()),
+    createdAt: new Date(),
+    completedAt: new Date(),
+  };
+  savedCorrections = [reviewCorrection];
+  const edited = result();
+  edited.questionBreakdown[0].awarded = 2;
+  await service.saveCorrectionReview("submission", "review", assistant, edited);
+  assert.equal(reviewCorrection.reviewedResult.totalAwarded, 4);
+  assert.equal(reviewCorrection.reviewedByName, "Assistant");
+  await service.confirmCorrectionReview("submission", "review", assistant);
+  assert.ok(reviewCorrection.confirmedAt);
+  assert.equal(reviewCorrection.confirmedByName, "Assistant");
+  await assert.rejects(
+    service.saveCorrectionReview("submission", "review", assistant, edited),
+    error => error.status === 409,
+  );
+  await service.reopenCorrectionReview("submission", "review", assistant);
+  assert.equal(reviewCorrection.confirmedAt, null);
+  await service.saveCorrectionReview("submission", "review", assistant, edited);
 });

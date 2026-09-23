@@ -28,6 +28,10 @@ router.post("/tasks/:taskId/references/retry", requireAssistantPermission("canGr
 router.post("/tasks/:taskId/references/approve", requireAssistantPermission("canGradeHomework"), taskController.approvePack);
 router.get("/submissions/:submissionId", requireRole("TEACHER", "ASSISTANT"), taskController.getCorrections);
 router.post("/submissions/:submissionId", requireAssistantPermission("canGradeHomework"), taskController.startCorrection);
+router.patch("/submissions/:submissionId/corrections/:correctionId", requireAssistantPermission("canGradeHomework"), taskController.saveCorrectionReview);
+router.post("/submissions/:submissionId/corrections/:correctionId/confirm", requireAssistantPermission("canGradeHomework"), taskController.confirmCorrectionReview);
+router.post("/submissions/:submissionId/corrections/:correctionId/reopen", requireAssistantPermission("canGradeHomework"), taskController.reopenCorrectionReview);
+router.get("/submissions/:submissionId/corrections/:correctionId/pdf", requireRole("TEACHER", "ASSISTANT"), taskController.exportCorrectionPdf);
 
 router.post(
   "/correct-paper",
