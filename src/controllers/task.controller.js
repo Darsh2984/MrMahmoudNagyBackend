@@ -180,9 +180,28 @@ async function updateTask(req, res) {
       );
     }
 
+    if (req.body.groupIds !== undefined) {
+      const groupIds = [
+        ...new Set(
+          parseGroupIds(req.body.groupIds)
+            .map((groupId) => String(groupId || "").trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      if (groupIds.length === 0) {
+        return res.status(400).json({
+          msg: "At least one group is required",
+        });
+      }
+
+      updateData.groupIds = groupIds;
+    }
+
     const task = await taskService.updateTask(
       req.params.taskId,
       updateData,
+      req.user,
     );
 
     return res.json({
