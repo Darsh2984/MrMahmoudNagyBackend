@@ -56,11 +56,12 @@ async function alertAssistantsOfStudentRegistration(student) {
   });
   const recipients = [...new Map(assignments.map(({ assistant }) => [assistant.id, assistant])).values()];
   const yearName = student.desiredYear.name;
+  const schoolName = student.school?.name || "Not specified";
   const message = {
     eyebrow: "New student registration",
     title: "Student awaiting group assignment",
     body: `${student.name} registered for ${yearName}. Please assign the student to the appropriate group.`,
-    emailMessage: `${student.name} (${student.email}) has completed registration and selected ${yearName}. Please let the dedicated assistant assign this student to the appropriate group.`,
+    emailMessage: `${student.name} (${student.email}) has completed registration and selected ${yearName}. School: ${schoolName}. Please let the dedicated assistant assign this student to the appropriate group.`,
     note: `This email was sent to all assistants assigned to groups under ${yearName}.`,
     link: "/groups",
     buttonLabel: "Review students and groups",

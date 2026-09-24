@@ -220,7 +220,14 @@ async function verifyStudentEmail(input) {
         motherName: details.motherName, motherPhone: details.motherPhone,
         accessCode,
       },
-      select: { id: true, name: true, email: true, accessCode: true, desiredYear: { select: { id: true, name: true } } },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        accessCode: true,
+        school: { select: { id: true, name: true } },
+        desiredYear: { select: { id: true, name: true } },
+      },
     });
     await tx.pendingStudentRegistration.delete({ where: { id: current.id } });
     return user;
