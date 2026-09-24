@@ -1,8 +1,6 @@
 const prisma = require("../config/prisma");
 
-const {
-  notify,
-} = require("./notification.service");
+const { alertAssistantOfDelegation } = require("./staffAlert.service");
 
 const MAX_BULK_SUBMISSIONS = 100;
 const BULK_DELEGATION_CONCURRENCY = 5;
@@ -183,24 +181,19 @@ async function getEligibleAssistant({
 }
 
 async function notifyAssistantOfDelegation({
-  assistantId,
+  assistant,
   submission,
   title,
   body,
+  count,
 }) {
   try {
-    await notify({
-      userId: assistantId,
-
-      type:
-        "HOMEWORK_DELEGATED",
-
+    await alertAssistantOfDelegation({
+      assistant,
+      submission,
       title,
-
       body,
-
-      link:
-        `/tasks/${submission.taskId}`,
+      count,
     });
   } catch (error) {
     console.error(
@@ -219,6 +212,7 @@ async function delegateSubmission({
   assistantId,
   delegatedById,
   reason,
+  skipNotification = false,
 }) {
   if (!delegatedById) {
     throw createServiceError(
@@ -331,17 +325,19 @@ async function delegateSubmission({
       },
     );
 
-  await notifyAssistantOfDelegation({
-    assistantId,
+  if (!skipNotification) {
+    await notifyAssistantOfDelegation({
+      assistant,
 
-    submission,
+      submission,
 
-    title:
-      "Homework assigned for grading",
+      title:
+        "Homework assigned for grading",
 
-    body:
-      `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"} for you to grade.`,
-  });
+      body:
+        `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"} for you to grade.`,
+    });
+  }
 
   return delegation;
 }
@@ -530,7 +526,7 @@ async function reassignDelegation({
     );
 
   await notifyAssistantOfDelegation({
-    assistantId,
+    assistant: newAssistant,
 
     submission:
       delegation.submission,
@@ -736,6 +732,7 @@ async function bulkDelegateSubmissions({
               assistantId,
               delegatedById,
               reason,
+              skipNotification: true,
             });
 
           return {
@@ -785,6 +782,26 @@ async function bulkDelegateSubmissions({
           result.error?.msg ||
           result.error?.message ||
           "Delegation failed.",
+      });
+    }
+  }
+
+  if (successful.length) {
+    const [assistant, submission] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: assistantId },
+        select: { id: true, name: true, email: true },
+      }),
+      getSubmissionForDelegation(successful[0].submissionId),
+    ]);
+
+    if (assistant) {
+      await notifyAssistantOfDelegation({
+        assistant,
+        submission,
+        title: "Homework submissions assigned for grading",
+        body: `${successful.length} homework submission${successful.length === 1 ? "" : "s"} ${successful.length === 1 ? "has" : "have"} been delegated to you for correction.`,
+        count: successful.length,
       });
     }
   }

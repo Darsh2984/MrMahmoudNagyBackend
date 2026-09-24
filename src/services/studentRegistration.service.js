@@ -4,6 +4,7 @@ const prisma = require("../config/prisma");
 const transporter = require("../config/nodemailer");
 const { generateAccessCode } = require("../utils/accessCode");
 const { renderEmail } = require("../utils/emailTemplate");
+const { alertAssistantsOfStudentRegistration } = require("./staffAlert.service");
 
 const EXPIRY_MINUTES = 30;
 const RESEND_COOLDOWN_MS = 60_000;
@@ -184,7 +185,7 @@ async function verifyStudentEmail(input) {
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  const user = await prisma.$transaction(async (tx) => {
     const current = await tx.pendingStudentRegistration.findUnique({ where: { id: pending.id } });
     if (!current || current.tokenHash !== pending.tokenHash || current.expiresAt <= new Date()) {
       throw serviceError(400, "Verification has expired or is invalid. Request a new email.");
@@ -219,11 +220,17 @@ async function verifyStudentEmail(input) {
         motherName: details.motherName, motherPhone: details.motherPhone,
         accessCode,
       },
-      select: { id: true, name: true, accessCode: true, desiredYear: { select: { id: true, name: true } } },
+      select: { id: true, name: true, email: true, accessCode: true, desiredYear: { select: { id: true, name: true } } },
     });
     await tx.pendingStudentRegistration.delete({ where: { id: current.id } });
     return user;
   });
+
+  alertAssistantsOfStudentRegistration(user).catch((error) => {
+    console.error("New student staff alert failed:", error?.message || error);
+  });
+
+  return user;
 }
 
 module.exports = { registerStudent, resendVerification, verifyStudentEmail };

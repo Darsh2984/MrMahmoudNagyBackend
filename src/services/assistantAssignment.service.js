@@ -25,7 +25,21 @@ async function unassignAssistantFromGroup({ assistantId, groupId }) {
 async function listGroupsForAssistant(assistantId) {
   return prisma.assistantGroupAssignment.findMany({
     where: { assistantId },
-    include: { group: { select: { id: true, name: true, yearId: true } } },
+    include: {
+      group: {
+        select: {
+          id: true,
+          name: true,
+          yearId: true,
+          year: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
   });
 }
 

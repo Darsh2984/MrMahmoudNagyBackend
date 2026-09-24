@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 const { notify } = require("./notification.service");
+const { alertAdminsOfHomeworkSubmission } = require("./staffAlert.service");
 
 const MAX_TOTAL_FILES = 20;
 const MAX_CORRECTED_FILES = 20;
@@ -567,6 +568,7 @@ async function confirmHomeworkUploads({
       taskId,
       studentId,
     });
+  const isFirstSubmission = !submission;
 
   if (
     submission &&
@@ -850,6 +852,12 @@ async function confirmHomeworkUploads({
     throw error;
   }
 
+  if (isFirstSubmission) {
+    alertAdminsOfHomeworkSubmission(submission.id).catch((error) => {
+      console.error("Homework submission staff alert failed:", error?.message || error);
+    });
+  }
+
   return {
     submission:
       await mapSubmission(submission),
@@ -1045,6 +1053,7 @@ async function submitHomework({
       taskId,
       studentId,
     });
+  const isFirstSubmission = !submission;
 
   if (
     submission &&
@@ -1265,6 +1274,12 @@ async function submitHomework({
     );
 
     throw error;
+  }
+
+  if (isFirstSubmission) {
+    alertAdminsOfHomeworkSubmission(submission.id).catch((error) => {
+      console.error("Homework submission staff alert failed:", error?.message || error);
+    });
   }
 
   return mapSubmission(submission);

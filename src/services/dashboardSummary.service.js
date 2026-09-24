@@ -20,6 +20,10 @@ async function getTeacherDashboardSummary(
 
   const totalYears = years.length;
 
+  const yearIds = years.map(
+    (year) => year.id,
+  );
+
   const allGroups = years.flatMap(
     (year) => year.groups,
   );
@@ -80,7 +84,9 @@ async function getTeacherDashboardSummary(
     await prisma.submission.count({
       where: {
         task: {
-          teacherId,
+          yearId: {
+            in: yearIds,
+          },
         },
 
         delegation: {
