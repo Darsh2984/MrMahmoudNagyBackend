@@ -43,6 +43,9 @@ async function delegateSubmission(
 
         reason:
           req.body.reason,
+
+        groupId:
+          req.body.groupId,
       });
 
     return res.status(201).json({
@@ -78,6 +81,9 @@ async function bulkDelegateSubmissions(
 
         reason:
           req.body.reason,
+
+        groupId:
+          req.body.groupId,
       });
 
     return res.status(200).json({
@@ -115,6 +121,9 @@ async function reassignDelegation(
 
         reason:
           req.body.reason,
+
+        groupId:
+          req.body.groupId,
       });
 
     return res.json({

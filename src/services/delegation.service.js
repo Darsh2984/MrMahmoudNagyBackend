@@ -101,6 +101,7 @@ async function getSubmissionForDelegation(
 async function getEligibleAssistant({
   assistantId,
   taskGroupIds,
+  requiredGroupId,
 }) {
   if (!assistantId) {
     throw createServiceError(
@@ -157,6 +158,22 @@ async function getEligibleAssistant({
     );
   }
 
+  const eligibleGroupIds = requiredGroupId
+    ? [String(requiredGroupId)]
+    : taskGroupIds;
+
+  if (
+    requiredGroupId &&
+    !taskGroupIds.some(
+      (groupId) => String(groupId) === String(requiredGroupId),
+    )
+  ) {
+    throw createServiceError(
+      400,
+      "The selected group is not assigned to this task.",
+    );
+  }
+
   const assignmentCount =
     await prisma
       .assistantGroupAssignment
@@ -165,7 +182,7 @@ async function getEligibleAssistant({
           assistantId,
 
           groupId: {
-            in: taskGroupIds,
+            in: eligibleGroupIds,
           },
         },
       });
@@ -212,6 +229,7 @@ async function delegateSubmission({
   assistantId,
   delegatedById,
   reason,
+  groupId,
   skipNotification = false,
 }) {
   if (!delegatedById) {
@@ -256,12 +274,29 @@ async function delegateSubmission({
     submission.task.groups.map(
       (taskGroup) =>
         taskGroup.groupId,
-    );
+      );
+
+  if (groupId) {
+    const membershipCount = await prisma.groupMembership.count({
+      where: {
+        studentId: submission.studentId,
+        groupId: String(groupId),
+      },
+    });
+
+    if (membershipCount === 0) {
+      throw createServiceError(
+        400,
+        "This student is not assigned to the selected group.",
+      );
+    }
+  }
 
   const assistant =
     await getEligibleAssistant({
       assistantId,
       taskGroupIds,
+      requiredGroupId: groupId,
     });
 
   const normalizedReason =
@@ -351,6 +386,7 @@ async function reassignDelegation({
   assistantId,
   changedById,
   reason,
+  groupId,
 }) {
   if (!changedById) {
     throw createServiceError(
@@ -441,12 +477,29 @@ async function reassignDelegation({
     delegation.submission.task.groups.map(
       (taskGroup) =>
         taskGroup.groupId,
-    );
+      );
+
+  if (groupId) {
+    const membershipCount = await prisma.groupMembership.count({
+      where: {
+        studentId: delegation.submission.studentId,
+        groupId: String(groupId),
+      },
+    });
+
+    if (membershipCount === 0) {
+      throw createServiceError(
+        400,
+        "This student is not assigned to the selected group.",
+      );
+    }
+  }
 
   const newAssistant =
     await getEligibleAssistant({
       assistantId,
       taskGroupIds,
+      requiredGroupId: groupId,
     });
 
   const previousAssistantId =
@@ -675,6 +728,7 @@ async function bulkDelegateSubmissions({
   assistantId,
   delegatedById,
   reason,
+  groupId,
 }) {
   if (
     !Array.isArray(submissionIds)
@@ -732,6 +786,7 @@ async function bulkDelegateSubmissions({
               assistantId,
               delegatedById,
               reason,
+              groupId,
               skipNotification: true,
             });
 

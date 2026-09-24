@@ -245,6 +245,7 @@ async function getTask(req, res) {
     const task = await taskService.getTaskWithSubmissions(
       req.params.taskId,
       req.user,
+      req.query.groupId,
     );
 
     return res.json(task);

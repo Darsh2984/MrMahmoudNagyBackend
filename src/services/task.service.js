@@ -384,7 +384,7 @@ async function listTasksForGroup(groupId, user) {
   });
 }
 
-async function getTaskWithSubmissions(taskId, user) {
+async function getTaskWithSubmissions(taskId, user, groupId) {
   const task = await prisma.task.findUnique({
     where: {
       id: taskId,
@@ -507,6 +507,48 @@ async function getTaskWithSubmissions(taskId, user) {
   const taskGroupIds = task.groups.map(
     (taskGroup) => taskGroup.groupId,
   );
+
+  const currentGroupId =
+    groupId && String(groupId) !== "ALL"
+      ? String(groupId)
+      : null;
+
+  if (
+    currentGroupId &&
+    !taskGroupIds.some(
+      (taskGroupId) =>
+        String(taskGroupId) === currentGroupId,
+    )
+  ) {
+    throw {
+      status: 400,
+      msg: "The selected group is not assigned to this task",
+    };
+  }
+
+  if (currentGroupId && task.submissions.length) {
+    const memberships =
+      await prisma.groupMembership.findMany({
+        where: {
+          groupId: currentGroupId,
+          studentId: {
+            in: task.submissions.map(
+              (submission) => submission.studentId,
+            ),
+          },
+        },
+        select: { studentId: true },
+      });
+
+    const groupStudentIds = new Set(
+      memberships.map(({ studentId }) => String(studentId)),
+    );
+
+    task.submissions = task.submissions.filter(
+      (submission) =>
+        groupStudentIds.has(String(submission.studentId)),
+    );
+  }
 
   if (!user) {
     throw {
