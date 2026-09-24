@@ -1,5 +1,8 @@
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
+const {
+  getSubmissionFlagStatus,
+} = require("./taskFlagging.service");
 
 async function createTask({ title, description, teacherId, yearId, deadline, gradeOutOf, groupIds, allowLateSubmission, taskFile }) {
   if (!groupIds || groupIds.length === 0) {
@@ -613,6 +616,75 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
     }
   }
 
+  const submissionGroupNames =
+    new Map();
+
+  if (
+    user.role !== "STUDENT" &&
+    task.submissions.length
+  ) {
+    const memberships =
+      await prisma.groupMembership.findMany({
+        where: {
+          studentId: {
+            in: task.submissions.map(
+              ({ studentId }) => studentId,
+            ),
+          },
+          groupId: {
+            in: taskGroupIds,
+          },
+        },
+        select: {
+          studentId: true,
+          group: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+    for (const membership of memberships) {
+      const studentId = String(
+        membership.studentId,
+      );
+      const groups =
+        submissionGroupNames.get(
+          studentId,
+        ) || [];
+
+      groups.push(membership.group);
+      submissionGroupNames.set(
+        studentId,
+        groups,
+      );
+    }
+  }
+
+  task.submissions =
+    task.submissions.map(
+      (submission) => ({
+        ...submission,
+        student: submission.student
+          ? {
+              ...submission.student,
+              groups:
+                submissionGroupNames.get(
+                  String(
+                    submission.studentId,
+                  ),
+                ) || [],
+            }
+          : submission.student,
+        ...getSubmissionFlagStatus(
+          submission.grade,
+          task.gradeOutOf,
+        ),
+      }),
+    );
+
   const [taskFileUrl, signedSubmissions] =
     await Promise.all([
       createSignedFileUrl(task.taskFileUrl),
@@ -631,4 +703,9 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
   };
 }
 
-module.exports = { createTask, updateTask, listTasksForGroup, getTaskWithSubmissions };
+module.exports = {
+  createTask,
+  updateTask,
+  listTasksForGroup,
+  getTaskWithSubmissions,
+};
