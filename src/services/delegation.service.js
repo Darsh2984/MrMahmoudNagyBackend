@@ -401,7 +401,10 @@ async function autoDelegateSubmission({
     };
   }
 
-  if (submission.task.taskType !== "HOMEWORK") {
+  if (
+    submission.task.taskType !== "HOMEWORK" &&
+    submission.submissionMethod !== "HARDCOPY"
+  ) {
     return {
       delegated: false,
       reason: "NOT_HOMEWORK",
@@ -513,7 +516,8 @@ async function autoDelegateSubmission({
 }
 
 /**
- * Reconciles existing ungraded Homework submissions that have no delegation.
+ * Reconciles existing ungraded Homework submissions and all hardcopy
+ * submissions that have no delegation.
  * A group filter is used after assignment changes; without one this performs
  * the startup backfill. Notifications are grouped to avoid one email per paper.
  */
@@ -522,12 +526,17 @@ async function autoDelegateUndelegatedSubmissions({ groupId } = {}) {
     where: {
       grade: null,
       delegation: null,
-      task: {
-        taskType: "HOMEWORK",
-        ...(groupId
-          ? { groups: { some: { groupId: String(groupId) } } }
-          : {}),
-      },
+      OR: [
+        { submissionMethod: "HARDCOPY" },
+        { task: { taskType: "HOMEWORK" } },
+      ],
+      ...(groupId
+        ? {
+            task: {
+              groups: { some: { groupId: String(groupId) } },
+            },
+          }
+        : {}),
     },
     select: { id: true },
     orderBy: [{ submittedAt: "asc" }, { id: "asc" }],

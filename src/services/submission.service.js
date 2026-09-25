@@ -61,7 +61,7 @@ function assertOnlineSubmission(submission) {
   if (submission?.submissionMethod === "HARDCOPY") {
     throw createServiceError(
       409,
-      "This homework is already recorded as a hardcopy submission. Contact the teaching team if this needs to be changed.",
+      "This task is already recorded as a hardcopy submission. Contact the teaching team if this needs to be changed.",
     );
   }
 }
@@ -326,10 +326,6 @@ async function markHardcopySubmission({
     throw createServiceError(404, "Task not found.");
   }
 
-  if (task.taskType !== "HOMEWORK") {
-    throw createServiceError(400, "Hardcopy submission is available for homework tasks only.");
-  }
-
   const student = await prisma.user.findUnique({
     where: { id: studentId },
     select: { id: true, role: true, name: true },
@@ -426,7 +422,7 @@ async function markHardcopySubmission({
         assistantId: markedBy.id,
         delegatedById: markedBy.id,
         groupId: resolvedGroupId,
-        reason: "Assistant received and recorded the student's hardcopy submission.",
+        reason: "Assistant received and recorded the student's external hardcopy submission.",
         skipNotification: true,
       });
     } else {
