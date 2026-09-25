@@ -2,7 +2,10 @@ const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 const { notify } = require("./notification.service");
 const { alertAdminsOfHomeworkSubmission } = require("./staffAlert.service");
-const { autoDelegateSubmission } = require("./delegation.service");
+const {
+  autoDelegateSubmission,
+  delegateSubmission,
+} = require("./delegation.service");
 
 const MAX_TOTAL_FILES = 20;
 const MAX_CORRECTED_FILES = 20;
@@ -52,6 +55,15 @@ function createServiceError(status, msg, data) {
   }
 
   return error;
+}
+
+function assertOnlineSubmission(submission) {
+  if (submission?.submissionMethod === "HARDCOPY") {
+    throw createServiceError(
+      409,
+      "This homework is already recorded as a hardcopy submission. Contact the teaching team if this needs to be changed.",
+    );
+  }
 }
 
 async function handleFirstSubmission(submissionId) {
@@ -291,6 +303,148 @@ async function findStudentSubmission({
   });
 }
 
+async function markHardcopySubmission({
+  taskId,
+  studentId,
+  groupId,
+  markedBy,
+}) {
+  if (!markedBy?.id || !["TEACHER", "ASSISTANT"].includes(markedBy.role)) {
+    throw createServiceError(403, "Only teaching staff can record a hardcopy submission.");
+  }
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      taskType: true,
+      groups: { select: { groupId: true } },
+    },
+  });
+
+  if (!task) {
+    throw createServiceError(404, "Task not found.");
+  }
+
+  if (task.taskType !== "HOMEWORK") {
+    throw createServiceError(400, "Hardcopy submission is available for homework tasks only.");
+  }
+
+  const student = await prisma.user.findUnique({
+    where: { id: studentId },
+    select: { id: true, role: true, name: true },
+  });
+
+  if (!student || student.role !== "STUDENT") {
+    throw createServiceError(400, "Select a valid student.");
+  }
+
+  const taskGroupIds = task.groups.map(({ groupId: id }) => String(id));
+  const memberships = await prisma.groupMembership.findMany({
+    where: {
+      studentId,
+      groupId: { in: taskGroupIds },
+    },
+    select: { groupId: true },
+  });
+  const studentTaskGroupIds = [
+    ...new Set(memberships.map(({ groupId: id }) => String(id))),
+  ];
+
+  if (!studentTaskGroupIds.length) {
+    throw createServiceError(400, "This student is not assigned to a group for this task.");
+  }
+
+  const requestedGroupId = groupId ? String(groupId) : null;
+  if (requestedGroupId && !studentTaskGroupIds.includes(requestedGroupId)) {
+    throw createServiceError(400, "This student is not assigned to the selected task group.");
+  }
+
+  const isRegularAssistant =
+    markedBy.role === "ASSISTANT" && markedBy.isHeadAssistant !== true;
+  let resolvedGroupId = requestedGroupId || studentTaskGroupIds[0];
+
+  if (isRegularAssistant) {
+    const assignments = await prisma.assistantGroupAssignment.findMany({
+      where: {
+        assistantId: markedBy.id,
+        groupId: { in: studentTaskGroupIds },
+      },
+      select: { groupId: true },
+    });
+    const assignedGroupIds = assignments.map(({ groupId: id }) => String(id));
+
+    if (requestedGroupId && !assignedGroupIds.includes(requestedGroupId)) {
+      throw createServiceError(403, "You are not assigned to this student's task group.");
+    }
+
+    if (!requestedGroupId) {
+      resolvedGroupId = assignedGroupIds[0];
+    }
+
+    if (!resolvedGroupId) {
+      throw createServiceError(403, "You are not assigned to this student's task group.");
+    }
+  }
+
+  const existing = await prisma.submission.findUnique({
+    where: { taskId_studentId: { taskId, studentId } },
+    select: { id: true, submissionMethod: true },
+  });
+
+  if (existing) {
+    throw createServiceError(
+      409,
+      existing.submissionMethod === "HARDCOPY"
+        ? "This student is already marked as having submitted a hardcopy."
+        : "This student already has an online submission for this task.",
+    );
+  }
+
+  const now = new Date();
+  let created;
+
+  try {
+    created = await prisma.submission.create({
+      data: {
+        taskId,
+        studentId,
+        submissionMethod: "HARDCOPY",
+        hardcopyMarkedAt: now,
+        hardcopyMarkedById: markedBy.id,
+        firstSubmittedAt: now,
+        submittedAt: now,
+        lastModifiedAt: now,
+        lastModifiedAfterDeadline: false,
+      },
+      select: { id: true },
+    });
+
+    if (isRegularAssistant) {
+      await delegateSubmission({
+        submissionId: created.id,
+        assistantId: markedBy.id,
+        delegatedById: markedBy.id,
+        groupId: resolvedGroupId,
+        reason: "Assistant received and recorded the student's hardcopy submission.",
+        skipNotification: true,
+      });
+    } else {
+      await autoDelegateSubmission({ submissionId: created.id });
+    }
+  } catch (error) {
+    if (created?.id) {
+      await prisma.submission.delete({ where: { id: created.id } }).catch(() => {});
+    }
+    if (error?.code === "P2002") {
+      throw createServiceError(409, "This student already has a submission for this task.");
+    }
+    throw error;
+  }
+
+  return mapSubmission(await findStudentSubmission({ taskId, studentId }));
+}
+
 function getHomeworkUploadPrefix(
   taskId,
   studentId,
@@ -499,6 +653,8 @@ async function prepareHomeworkUploads({
       studentId,
     });
 
+  assertOnlineSubmission(submission);
+
   if (
     submission &&
     submission.grade !== null
@@ -589,6 +745,7 @@ async function confirmHomeworkUploads({
       taskId,
       studentId,
     });
+  assertOnlineSubmission(submission);
   const isFirstSubmission = !submission;
 
   if (
@@ -1072,6 +1229,7 @@ async function submitHomework({
       taskId,
       studentId,
     });
+  assertOnlineSubmission(submission);
   const isFirstSubmission = !submission;
 
   if (
@@ -2500,6 +2658,7 @@ async function deleteCorrectedFile({
 }
 
 module.exports = {
+  markHardcopySubmission,
   submitHomework,
   prepareHomeworkUploads,
   confirmHomeworkUploads,

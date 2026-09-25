@@ -20,6 +20,12 @@ const {
 } = require("../middleware/correctedHomeworkUpload.middleware.js");
 
 router.post(
+  "/task/:taskId/hardcopy",
+  requireAssistantPermission("canGradeHomework"),
+  submissionController.markHardcopySubmission,
+);
+
+router.post(
   "/task/:taskId",
   requireRole("STUDENT"),
   homeworkFilesUpload,

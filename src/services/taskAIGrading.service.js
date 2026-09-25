@@ -267,8 +267,11 @@ async function listCorrections(submissionId, user) {
   };
 }
 async function startCorrection(submissionId, user, fileIds) {
-  requireAI();
   const submission = await assertSubmissionAccess(submissionId, user);
+  if (submission.submissionMethod === "HARDCOPY") {
+    fail(409, "AI grading is unavailable for hardcopy submissions because no original student answer files were uploaded.");
+  }
+  requireAI();
   const pack = await latestPack(submission.taskId);
   if (!pack || pack.status !== "READY" || !pack.approvedAt) fail(409, "Upload and approve this task's question paper and mark scheme first.");
   const available = sourceFiles(submission);

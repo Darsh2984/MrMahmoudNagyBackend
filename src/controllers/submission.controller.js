@@ -51,6 +51,24 @@ async function submitHomework(
   }
 }
 
+async function markHardcopySubmission(req, res) {
+  try {
+    const submission = await submissionService.markHardcopySubmission({
+      taskId: req.params.taskId,
+      studentId: req.body.studentId,
+      groupId: req.body.groupId,
+      markedBy: req.user,
+    });
+
+    return res.status(201).json({
+      msg: "Hardcopy submission recorded. You can now grade it and upload corrected files.",
+      submission,
+    });
+  } catch (error) {
+    return sendError(res, error, "Error recording hardcopy submission.");
+  }
+}
+
 async function prepareHomeworkUploads(
   req,
   res,
@@ -318,6 +336,7 @@ async function getGradingHistory(
 }
 
 module.exports = {
+  markHardcopySubmission,
   submitHomework,
   prepareHomeworkUploads,
   confirmHomeworkUploads,

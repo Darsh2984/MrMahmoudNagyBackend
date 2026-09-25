@@ -186,6 +186,7 @@ model User {
   correctedPaperQuizFilesUploaded CorrectedPaperQuizFile[]  @relation("CorrectedPaperQuizUploadedBy")
 
   homeworkSubmissionsGraded Submission[] @relation("HomeworkGradedBy")
+  hardcopySubmissionsMarked Submission[] @relation("HardcopySubmissionMarkedBy")
 
   homeworkGradingHistoryChanges HomeworkGradingHistory[] @relation("HomeworkGradingHistoryChangedBy")
 
@@ -865,6 +866,11 @@ enum TaskType {
   IN_CLASS_QUIZ
 }
 
+enum SubmissionMethod {
+  ONLINE
+  HARDCOPY
+}
+
 model Task {
   id                  String   @id @default(uuid())
   title               String
@@ -909,6 +915,11 @@ model Submission {
   studentId String
   student   User   @relation("StudentSubmissions", fields: [studentId], references: [id])
 
+  submissionMethod   SubmissionMethod @default(ONLINE)
+  hardcopyMarkedAt   DateTime?
+  hardcopyMarkedById String?
+  hardcopyMarkedBy   User?            @relation("HardcopySubmissionMarkedBy", fields: [hardcopyMarkedById], references: [id], onDelete: SetNull)
+
   // Legacy single-file field.
   // Keep temporarily so existing production records remain readable.
   fileUrl String?
@@ -950,6 +961,8 @@ model Submission {
   @@index([gradedAt])
   @@index([gradedById])
   @@index([lastModifiedAfterDeadline])
+  @@index([submissionMethod])
+  @@index([hardcopyMarkedById])
 }
 
 // Private staff-only AI marking references and suggestions. Never student grades.

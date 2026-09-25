@@ -372,6 +372,30 @@ async function listTasksForGroup(groupId, user) {
     };
   }
 
+  if (user?.role !== "STUDENT") {
+    include._count = {
+      select: {
+        submissions: {
+          where: {
+            grade: null,
+            student: {
+              groupMemberships: {
+                some: { groupId },
+              },
+            },
+            ...(!isAdminLevel(user)
+              ? {
+                  delegation: {
+                    assistantId: user.id,
+                  },
+                }
+              : {}),
+          },
+        },
+      },
+    };
+  }
+
   return prisma.task.findMany({
     where: {
       groups: {
@@ -426,6 +450,15 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
           },
 
           gradedBy: {
+            select: {
+              id: true,
+              name: true,
+              role: true,
+              isHeadAssistant: true,
+            },
+          },
+
+          hardcopyMarkedBy: {
             select: {
               id: true,
               name: true,
@@ -509,6 +542,10 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
     };
   }
 
+  const allSubmittedStudentIds = new Set(
+    task.submissions.map(({ studentId }) => String(studentId)),
+  );
+
   const taskGroupIds = task.groups.map(
     (taskGroup) => taskGroup.groupId,
   );
@@ -562,6 +599,8 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
     };
   }
 
+  let visibleStaffGroupIds = [];
+
   if (!isAdminLevel(user)) {
     if (user.role === "STUDENT") {
       const membershipCount =
@@ -587,17 +626,25 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
           submission.studentId === user.id,
       );
     } else if (user.role === "ASSISTANT") {
-        const assignmentCount =
-          await prisma.assistantGroupAssignment.count({
+        const assignments =
+          await prisma.assistantGroupAssignment.findMany({
             where: {
               assistantId: user.id,
               groupId: {
                 in: taskGroupIds,
               },
             },
+            select: { groupId: true },
           });
 
-        if (assignmentCount === 0) {
+        const assignedGroupIds = assignments.map(
+          ({ groupId: id }) => String(id),
+        );
+        visibleStaffGroupIds = currentGroupId
+          ? assignedGroupIds.filter((id) => id === currentGroupId)
+          : assignedGroupIds;
+
+        if (visibleStaffGroupIds.length === 0) {
           throw {
             status: 403,
             msg: "You are not assigned to this task's groups",
@@ -616,6 +663,10 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
         msg: "You do not have access to this task",
       };
     }
+  } else {
+    visibleStaffGroupIds = currentGroupId
+      ? [currentGroupId]
+      : taskGroupIds.map(String);
   }
 
   const submissionGroupNames =
@@ -687,6 +738,41 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
       }),
     );
 
+  let unsubmittedStudents = [];
+
+  if (user.role !== "STUDENT" && visibleStaffGroupIds.length) {
+    const memberships = await prisma.groupMembership.findMany({
+      where: {
+        groupId: { in: visibleStaffGroupIds },
+        studentId: allSubmittedStudentIds.size
+          ? { notIn: [...allSubmittedStudentIds] }
+          : undefined,
+        student: { role: "STUDENT" },
+      },
+      select: {
+        student: {
+          select: { id: true, name: true, email: true },
+        },
+        group: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { student: { name: "asc" } },
+    });
+
+    const byStudent = new Map();
+    for (const membership of memberships) {
+      const studentId = String(membership.student.id);
+      const entry = byStudent.get(studentId) || {
+        ...membership.student,
+        groups: [],
+      };
+      entry.groups.push(membership.group);
+      byStudent.set(studentId, entry);
+    }
+    unsubmittedStudents = [...byStudent.values()];
+  }
+
   const [taskFileUrl, signedSubmissions] =
     await Promise.all([
       createSignedFileUrl(task.taskFileUrl),
@@ -702,6 +788,7 @@ async function getTaskWithSubmissions(taskId, user, groupId) {
     ...task,
     taskFileUrl,
     submissions: signedSubmissions,
+    unsubmittedStudents,
   };
 }
 

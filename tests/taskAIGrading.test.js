@@ -89,7 +89,8 @@ test("rubric rejects duplicate labels and empty/invalid scoring", () => {
 let assigned = 1;
 let delegation = { assistantId: "assistant" };
 let activePack = { id: "pack", taskId: "task", status: "READY", approvedAt: new Date(), activatedAt: new Date(), rubric };
-const submission = () => ({ id: "submission", taskId: "task", files: [
+let submissionMethod = "ONLINE";
+const submission = () => ({ id: "submission", taskId: "task", submissionMethod, files: [
   { id: "answer", objectKey: "private/answer.pdf", originalName: "answer.pdf", contentType: "application/pdf", size: 10, uploadedAt: new Date("2026-09-18T10:00:00Z") },
 ], delegation });
 let savedCorrections = [];
@@ -152,6 +153,23 @@ test("approved rubric required, foreign/duplicate file IDs rejected, completed r
     assert.equal(reused.corrections[0].stale, false);
     // No grade update method, notifications or Gemini client exists in the stubs.
   } finally {
+    if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = oldKey;
+  }
+});
+
+test("hardcopy submissions cannot start AI grading", async () => {
+  const oldKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "test-placeholder-not-used";
+  submissionMethod = "HARDCOPY";
+
+  try {
+    await assert.rejects(
+      service.startCorrection("submission", assistant, ["answer"]),
+      error => error.status === 409 && /hardcopy/i.test(error.message),
+    );
+  } finally {
+    submissionMethod = "ONLINE";
     if (oldKey === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = oldKey;
   }
