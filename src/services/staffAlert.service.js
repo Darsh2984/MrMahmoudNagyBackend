@@ -83,6 +83,11 @@ async function alertAdminsOfHomeworkSubmission(submissionId) {
           groups: { select: { groupId: true, group: { select: { name: true } } } },
         },
       },
+      delegation: {
+        select: {
+          assistant: { select: { name: true } },
+        },
+      },
     },
   });
   if (!submission) return;
@@ -103,10 +108,15 @@ async function alertAdminsOfHomeworkSubmission(submissionId) {
   const fallbackGroups = submission.task.groups.map(({ group }) => group.name);
   const groupLabel = (groupNames.length ? groupNames : fallbackGroups).join(", ") || "Unassigned group";
   const yearLabel = year?.name || "Unknown year";
+  const automaticAssistantName = submission.delegation?.assistant?.name;
   const message = {
     eyebrow: "Homework submitted",
-    title: "Homework needs delegation",
-    body: `${submission.student.name} submitted ${submission.task.title} (${yearLabel} · ${groupLabel}). Please delegate it to an assistant for correction.`,
+    title: automaticAssistantName
+      ? "Homework automatically delegated"
+      : "Homework needs delegation",
+    body: automaticAssistantName
+      ? `${submission.student.name} submitted ${submission.task.title} (${yearLabel} · ${groupLabel}). It was automatically delegated to ${automaticAssistantName} for correction.`
+      : `${submission.student.name} submitted ${submission.task.title} (${yearLabel} · ${groupLabel}). Please delegate it to an assistant for correction.`,
     link: `/tasks/${submission.task.id}`,
     buttonLabel: "Open task submissions",
   };

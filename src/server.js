@@ -1,6 +1,8 @@
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
 const http = require("http");
 const jwt = require("jsonwebtoken");
 const prisma = require("./config/prisma");
@@ -18,11 +20,12 @@ const studentSupportChatService = require(
 const { Server } = require("socket.io");
 const cron = require("node-cron");
 
-dotenv.config();
-
 const submissionService = require(
   "./services/submission.service",
 );
+const {
+  autoDelegateUndelegatedSubmissions,
+} = require("./services/delegation.service");
 
 const authenticate = require("./middleware/auth.middleware");
 const studentActivityLog = require("./middleware/studentActivityLog.middleware");
@@ -781,4 +784,19 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 6000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+
+  autoDelegateUndelegatedSubmissions()
+    .then((summary) => {
+      console.log(
+        `Automatic delegation reconciliation checked ${summary.checked} submission(s); delegated ${summary.delegated}.`,
+      );
+    })
+    .catch((error) => {
+      console.error(
+        "Startup automatic-delegation reconciliation failed:",
+        error?.message || error,
+      );
+    });
+});

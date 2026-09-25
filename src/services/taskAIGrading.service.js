@@ -1,10 +1,13 @@
 const crypto = require("crypto");
 const fs = require("fs/promises");
-const { PDFDocument } = require("pdf-lib");
 const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 const { rubricSchema, correctionSchema, validateRubric, validateCorrection } = require("./taskAIGrading.validation");
-const { answerMimeType, detectAnswerMimeType } = require("./taskAIGrading.media");
+const {
+  answerMimeType,
+  detectAnswerMimeType,
+  validatePdfForAI,
+} = require("./taskAIGrading.media");
 
 const JOB_TIMEOUT_MS = 10 * 60 * 1000;
 const cachePromises = new Map();
@@ -83,13 +86,12 @@ async function getTaskPack(taskId, user) {
   return mapPack(await latestPack(taskId));
 }
 async function verifyPdf(buffer, label) {
-  if (!buffer.length || buffer.length > 50 * 1024 * 1024) fail(400, `${label} must be a non-empty PDF no larger than 50 MB.`);
-  try {
-    const pdf = await PDFDocument.load(buffer);
-    if (pdf.getPageCount() > 500) fail(400, `${label} exceeds the 500-page limit.`);
-  } catch (error) {
-    if (error.status) throw error;
-    fail(400, `${label} is not a readable PDF. Remove password protection and try again.`);
+  const inspection = await validatePdfForAI(buffer, label);
+
+  if (inspection.compatibilityWarning) {
+    console.warn(
+      `${label} passed tolerant PDF validation: ${inspection.compatibilityWarning}`,
+    );
   }
 }
 function launch(job, label) {
@@ -166,7 +168,14 @@ async function uploadGeminiFile(ai, buffer, displayName, names, mimeType = "appl
     await new Promise(resolve => setTimeout(resolve, 1000));
     file = await ai.files.get({ name: file.name });
   }
-  if (file.state === "FAILED" || file.state === "PROCESSING" || !file.uri) fail(502, `Gemini could not process ${displayName}.`);
+  if (file.state === "FAILED" || file.state === "PROCESSING" || !file.uri) {
+    fail(
+      502,
+      mimeType === "application/pdf"
+        ? `Gemini could not process ${displayName}. Open the file and Print or Save as PDF, then upload the new copy.`
+        : `Gemini could not process ${displayName}. Try exporting the image again.`,
+    );
+  }
   return { fileData: { fileUri: file.uri, mimeType } };
 }
 function responseJson(response) {

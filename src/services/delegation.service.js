@@ -1,9 +1,13 @@
 const prisma = require("../config/prisma");
 
 const { alertAssistantOfDelegation } = require("./staffAlert.service");
+const {
+  evaluateAssistantAssignments,
+} = require("./autoDelegationPolicy.service");
 
 const MAX_BULK_SUBMISSIONS = 100;
 const BULK_DELEGATION_CONCURRENCY = 5;
+const AUTO_DELEGATION_CONCURRENCY = 5;
 
 function createServiceError(
   status,
@@ -375,6 +379,212 @@ async function delegateSubmission({
   }
 
   return delegation;
+}
+
+/**
+ * Automatically delegates a new submission only when its student belongs to
+ * exactly one of the task's groups and that group has exactly one assigned
+ * assistant who can grade homework. Every ambiguous case remains undelegated.
+ */
+async function autoDelegateSubmission({
+  submissionId,
+  skipNotification = false,
+}) {
+  const submission = await getSubmissionForDelegation(submissionId);
+
+  if (submission.grade !== null || submission.delegation) {
+    return {
+      delegated: false,
+      reason: submission.delegation
+        ? "ALREADY_DELEGATED"
+        : "ALREADY_GRADED",
+    };
+  }
+
+  if (submission.task.taskType !== "HOMEWORK") {
+    return {
+      delegated: false,
+      reason: "NOT_HOMEWORK",
+    };
+  }
+
+  const taskGroupIds = submission.task.groups.map(
+    ({ groupId }) => groupId,
+  );
+
+  const memberships = await prisma.groupMembership.findMany({
+    where: {
+      studentId: submission.studentId,
+      groupId: { in: taskGroupIds },
+    },
+    select: { groupId: true },
+  });
+
+  const relevantGroupIds = [
+    ...new Set(memberships.map(({ groupId }) => String(groupId))),
+  ];
+
+  if (relevantGroupIds.length !== 1) {
+    return {
+      delegated: false,
+      reason:
+        relevantGroupIds.length === 0
+          ? "NO_RELEVANT_GROUP"
+          : "MULTIPLE_RELEVANT_GROUPS",
+    };
+  }
+
+  const groupId = relevantGroupIds[0];
+  const assignments = await prisma.assistantGroupAssignment.findMany({
+    where: { groupId },
+    select: {
+      assistant: {
+        select: {
+          id: true,
+          role: true,
+          isHeadAssistant: true,
+          permissions: true,
+        },
+      },
+    },
+  });
+
+  const assignmentDecision = evaluateAssistantAssignments(assignments);
+
+  if (!assignmentDecision.assistant) {
+    return {
+      delegated: false,
+      reason: assignmentDecision.reason,
+      groupId,
+    };
+  }
+
+  const assistant = assignmentDecision.assistant;
+  const delegation = await delegateSubmission({
+    submissionId,
+    assistantId: assistant.id,
+    delegatedById: submission.task.teacherId,
+    groupId,
+    reason:
+      "Automatically delegated because this group has one eligible assistant.",
+    skipNotification: true,
+  });
+
+  if (!skipNotification) {
+    notifyAssistantOfDelegation({
+      assistant: delegation.assistant,
+      submission,
+      title: "Homework automatically assigned for grading",
+      body: `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
+    }).catch((error) => {
+      console.error(
+        "Automatic delegation notification failed:",
+        error.message,
+      );
+    });
+  }
+
+  return {
+    delegated: true,
+    delegation,
+    groupId,
+    assistantId: assistant.id,
+    submission,
+  };
+}
+
+/**
+ * Reconciles existing ungraded Homework submissions that have no delegation.
+ * A group filter is used after assignment changes; without one this performs
+ * the startup backfill. Notifications are grouped to avoid one email per paper.
+ */
+async function autoDelegateUndelegatedSubmissions({ groupId } = {}) {
+  const pendingSubmissions = await prisma.submission.findMany({
+    where: {
+      grade: null,
+      delegation: null,
+      task: {
+        taskType: "HOMEWORK",
+        ...(groupId
+          ? { groups: { some: { groupId: String(groupId) } } }
+          : {}),
+      },
+    },
+    select: { id: true },
+    orderBy: [{ submittedAt: "asc" }, { id: "asc" }],
+  });
+
+  const outcomes = [];
+
+  for (
+    let index = 0;
+    index < pendingSubmissions.length;
+    index += AUTO_DELEGATION_CONCURRENCY
+  ) {
+    const batch = pendingSubmissions.slice(
+      index,
+      index + AUTO_DELEGATION_CONCURRENCY,
+    );
+
+    const batchOutcomes = await Promise.all(
+      batch.map(async ({ id }) => {
+        try {
+          return await autoDelegateSubmission({
+            submissionId: id,
+            skipNotification: true,
+          });
+        } catch (error) {
+          console.error(
+            `Automatic delegation reconciliation failed for submission ${id}:`,
+            error?.message || error,
+          );
+          return {
+            delegated: false,
+            reason: "ERROR",
+          };
+        }
+      }),
+    );
+
+    outcomes.push(...batchOutcomes);
+  }
+
+  const delegated = outcomes.filter((outcome) => outcome.delegated);
+  const notificationGroups = new Map();
+
+  for (const outcome of delegated) {
+    const key = `${outcome.assistantId}_${outcome.submission.taskId}`;
+    const existing = notificationGroups.get(key);
+
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    notificationGroups.set(key, {
+      assistant: outcome.delegation.assistant,
+      submission: outcome.submission,
+      count: 1,
+    });
+  }
+
+  await Promise.allSettled(
+    [...notificationGroups.values()].map(({ assistant, submission, count }) =>
+      notifyAssistantOfDelegation({
+        assistant,
+        submission,
+        count,
+        title: "Homework automatically assigned for grading",
+        body: `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
+      }),
+    ),
+  );
+
+  return {
+    checked: pendingSubmissions.length,
+    delegated: delegated.length,
+    leftUndelegated: pendingSubmissions.length - delegated.length,
+  };
 }
 
 /**
@@ -1122,6 +1332,8 @@ async function getDelegationCounts({
 }
 
 module.exports = {
+  autoDelegateSubmission,
+  autoDelegateUndelegatedSubmissions,
   delegateSubmission,
   reassignDelegation,
   removeDelegation,

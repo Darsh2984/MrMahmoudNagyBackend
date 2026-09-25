@@ -1,4 +1,24 @@
 const prisma = require("../config/prisma");
+const {
+  autoDelegateUndelegatedSubmissions,
+} = require("./delegation.service");
+
+function reconcileUndelegatedSubmissions(groupId) {
+  autoDelegateUndelegatedSubmissions({ groupId })
+    .then((summary) => {
+      if (summary.delegated > 0) {
+        console.log(
+          `Automatically delegated ${summary.delegated} existing submission(s) for group ${groupId}.`,
+        );
+      }
+    })
+    .catch((error) => {
+      console.error(
+        `Group automatic-delegation reconciliation failed for ${groupId}:`,
+        error?.message || error,
+      );
+    });
+}
 
 async function assignAssistantToGroup({ assistantId, groupId }) {
   const assistant = await prisma.user.findUnique({ where: { id: assistantId } });
@@ -13,13 +33,21 @@ async function assignAssistantToGroup({ assistantId, groupId }) {
   });
   if (existing) throw { status: 400, msg: "Assistant is already assigned to this group" };
 
-  return prisma.assistantGroupAssignment.create({ data: { assistantId, groupId } });
+  const assignment = await prisma.assistantGroupAssignment.create({
+    data: { assistantId, groupId },
+  });
+
+  reconcileUndelegatedSubmissions(groupId);
+  return assignment;
 }
 
 async function unassignAssistantFromGroup({ assistantId, groupId }) {
-  return prisma.assistantGroupAssignment.delete({
+  const assignment = await prisma.assistantGroupAssignment.delete({
     where: { assistantId_groupId: { assistantId, groupId } },
   });
+
+  reconcileUndelegatedSubmissions(groupId);
+  return assignment;
 }
 
 async function listGroupsForAssistant(assistantId) {

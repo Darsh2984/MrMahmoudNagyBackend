@@ -1,7 +1,12 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { validateRubric, validateCorrection } = require("../src/services/taskAIGrading.validation");
-const { answerMimeType, detectAnswerMimeType } = require("../src/services/taskAIGrading.media");
+const {
+  answerMimeType,
+  detectAnswerMimeType,
+  validatePdfForAI,
+} = require("../src/services/taskAIGrading.media");
+const { PDFDocument } = require("pdf-lib");
 
 test("PDF/image detection normalizes JPG MIME and checks stored bytes", () => {
   assert.equal(answerMimeType({ contentType: "image/jpg" }), "image/jpeg");
@@ -13,6 +18,37 @@ test("PDF/image detection normalizes JPG MIME and checks stored bytes", () => {
   Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(png);
   assert.equal(detectAnswerMimeType(png), "image/png");
   assert.throws(() => detectAnswerMimeType(Buffer.from("fake renamed image")));
+});
+
+test("PDF validation accepts standard PDFs and recoverable scanner-style PDFs", async () => {
+  const document = await PDFDocument.create();
+  document.addPage();
+  const standard = Buffer.from(await document.save());
+  const standardResult = await validatePdfForAI(standard, "Answer");
+  assert.equal(standardResult.pageCount, 1);
+  assert.equal(standardResult.compatibilityWarning, null);
+
+  const recoverable = Buffer.from(
+    "%PDF-1.7\nThis nonstandard scanner structure is intentionally not parseable\n%%EOF",
+  );
+  const recoverableResult = await validatePdfForAI(recoverable, "Answer");
+  assert.equal(recoverableResult.pageCount, null);
+  assert.ok(recoverableResult.compatibilityWarning);
+});
+
+test("PDF validation gives accurate errors for encrypted, incomplete and renamed files", async () => {
+  await assert.rejects(
+    validatePdfForAI(Buffer.from("%PDF-1.7\n/Encrypt 2 0 R\n%%EOF"), "Answer"),
+    /encrypted or password-protected/i,
+  );
+  await assert.rejects(
+    validatePdfForAI(Buffer.from("%PDF-1.7\ntruncated"), "Answer"),
+    /incomplete or corrupted/i,
+  );
+  await assert.rejects(
+    validatePdfForAI(Buffer.from("this is not a PDF"), "Answer"),
+    /valid PDF header/i,
+  );
 });
 
 function question(label, marks) {

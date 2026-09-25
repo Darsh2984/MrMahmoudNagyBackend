@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const storage = require("./storage.service");
 const { notify } = require("./notification.service");
 const { alertAdminsOfHomeworkSubmission } = require("./staffAlert.service");
+const { autoDelegateSubmission } = require("./delegation.service");
 
 const MAX_TOTAL_FILES = 20;
 const MAX_CORRECTED_FILES = 20;
@@ -51,6 +52,26 @@ function createServiceError(status, msg, data) {
   }
 
   return error;
+}
+
+async function handleFirstSubmission(submissionId) {
+  try {
+    await autoDelegateSubmission({ submissionId });
+  } catch (error) {
+    // Upload success must not be rolled back by an automatic-assignment issue.
+    // The submission remains visible to teacher/head assistant for delegation.
+    console.error(
+      "Automatic homework delegation failed:",
+      error?.message || error,
+    );
+  }
+
+  alertAdminsOfHomeworkSubmission(submissionId).catch((error) => {
+    console.error(
+      "Homework submission staff alert failed:",
+      error?.message || error,
+    );
+  });
 }
 
 async function getSignedUrl(objectKey) {
@@ -853,9 +874,7 @@ async function confirmHomeworkUploads({
   }
 
   if (isFirstSubmission) {
-    alertAdminsOfHomeworkSubmission(submission.id).catch((error) => {
-      console.error("Homework submission staff alert failed:", error?.message || error);
-    });
+    await handleFirstSubmission(submission.id);
   }
 
   return {
@@ -1277,9 +1296,7 @@ async function submitHomework({
   }
 
   if (isFirstSubmission) {
-    alertAdminsOfHomeworkSubmission(submission.id).catch((error) => {
-      console.error("Homework submission staff alert failed:", error?.message || error);
-    });
+    await handleFirstSubmission(submission.id);
   }
 
   return mapSubmission(submission);
