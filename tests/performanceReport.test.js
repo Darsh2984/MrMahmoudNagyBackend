@@ -12,24 +12,21 @@ test("Egypt date boundaries include the end day across daylight-saving changes",
   assert.throws(() => service.parsePeriod("2026-02-30", "2026-03-01"), /valid start and end/);
 });
 
-test("report queries filter by session date, task deadline, quiz date, and in-class date", async () => {
+test("report queries filter attendance by session date and both task types by deadline", async () => {
   const originals = {
     session: prisma.session.findMany,
     task: prisma.task.findMany,
-    quiz: prisma.quiz.findMany,
-    inClassQuiz: prisma.inClassQuiz.findMany,
   };
   const queries = {};
   try {
     for (const kind of Object.keys(originals)) {
       prisma[kind].findMany = async (query) => {
         queries[kind] = query;
-        if (kind === "quiz") {
+        if (kind === "task") {
           return [{
-            id: "quiz-1", title: "Paper", type: "PAPER",
-            startAt: new Date("2026-09-10T10:00:00Z"), publishedAt: null,
-            totalPoints: 10, questions: [{ points: 10 }],
-            submissions: [{ studentId: "student-1", score: 0, isGraded: false }],
+            id: "task-1", title: "Class practice", taskType: "IN_CLASS_QUIZ",
+            deadline: new Date("2026-09-10T10:00:00Z"), gradeOutOf: 10,
+            submissions: [{ studentId: "student-1", grade: 7 }],
           }];
         }
         return [];
@@ -42,16 +39,11 @@ test("report queries filter by session date, task deadline, quiz date, and in-cl
       period,
     );
     assert.equal(reports.length, 1);
-    assert.equal(reports[0].quizzes[0].attempted, true);
-    assert.equal(reports[0].quizzes[0].score, null);
+    assert.equal(reports[0].homework.length, 0);
+    assert.equal(reports[0].inClassQuizzes[0].submitted, true);
+    assert.equal(reports[0].inClassQuizzes[0].grade, 7);
     assert.deepEqual(queries.session.where.date, { gte: period.from, lt: period.until });
     assert.deepEqual(queries.task.where.deadline, { gte: period.from, lt: period.until });
-    assert.deepEqual(queries.inClassQuiz.where.date, { gte: period.from, lt: period.until });
-    assert.deepEqual(queries.quiz.where.OR, [
-      { startAt: { gte: period.from, lt: period.until } },
-      { startAt: null, publishedAt: { gte: period.from, lt: period.until } },
-    ]);
-    assert.deepEqual(queries.quiz.where.status, { in: ["PUBLISHED", "CLOSED"] });
   } finally {
     for (const [kind, original] of Object.entries(originals)) {
       prisma[kind].findMany = original;
@@ -69,9 +61,8 @@ test("one student produces a PDF and multiple students produce separate PDFs in 
       title: `Session ${index + 1} - Algebra and revision`, date,
       status: index % 3 === 0 ? "ABSENT" : "PRESENT",
     })),
-    tasks: [{ title: "Homework one", date, submitted: true, grade: 8, gradeOutOf: 10 }],
-    quizzes: [{ title: "Chapter quiz", date, attempted: true, score: 4, total: 5 }],
-    inClassQuizzes: [{ title: "Class practice", date, grade: 7, gradeOutOf: 10 }],
+    homework: [{ title: "Homework one", date, submitted: true, grade: 8, gradeOutOf: 10 }],
+    inClassQuizzes: [{ title: "Class practice", date, submitted: true, grade: 7, gradeOutOf: 10 }],
   });
   const first = makeReport("student-1", "أحمد عبدالله Ahmed");
   const second = makeReport("student-2", "Mariam");

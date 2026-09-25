@@ -4,7 +4,7 @@ const {
   getSubmissionFlagStatus,
 } = require("./taskFlagging.service");
 
-async function createTask({ title, description, teacherId, yearId, deadline, gradeOutOf, groupIds, allowLateSubmission, taskFile }) {
+async function createTask({ title, description, teacherId, yearId, deadline, gradeOutOf, taskType, groupIds, allowLateSubmission, taskFile }) {
   if (!groupIds || groupIds.length === 0) {
     throw { status: 400, msg: "At least one groupId is required" };
   }
@@ -22,6 +22,7 @@ async function createTask({ title, description, teacherId, yearId, deadline, gra
       yearId,
       deadline: new Date(deadline),
       gradeOutOf,
+      taskType,
       taskFileUrl,
       allowLateSubmission: allowLateSubmission !== undefined ? allowLateSubmission : true,
       groups: { create: groupIds.map((groupId) => ({ groupId })) },
@@ -31,7 +32,7 @@ async function createTask({ title, description, teacherId, yearId, deadline, gra
 }
 
 /** Teacher/assistant edits a task after creation — including toggling late-submission and replacing the file. */
-async function updateTask(taskId, { title, description, deadline, gradeOutOf, allowLateSubmission, groupIds, taskFile }, user) {
+async function updateTask(taskId, { title, description, deadline, gradeOutOf, taskType, allowLateSubmission, groupIds, taskFile }, user) {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     include: {
@@ -81,6 +82,7 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, al
         ...(description !== undefined ? { description } : {}),
         ...(updatedDeadline ? { deadline: updatedDeadline } : {}),
         ...(gradeOutOf !== undefined ? { gradeOutOf } : {}),
+        ...(taskType !== undefined ? { taskType } : {}),
         ...(allowLateSubmission !== undefined ? { allowLateSubmission } : {}),
         ...(groupIds !== undefined
           ? {

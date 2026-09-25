@@ -69,7 +69,7 @@ async function loadGroupReports(group, students, period) {
   const studentIds = students.map((student) => student.id);
   const dateRange = { gte: period.from, lt: period.until };
 
-  const [sessions, tasks, quizzes, inClassQuizzes] = await Promise.all([
+  const [sessions, tasks] = await Promise.all([
     prisma.session.findMany({
       where: { groupId: group.id, date: dateRange },
       orderBy: [{ date: "asc" }, { id: "asc" }],
@@ -85,55 +85,17 @@ async function loadGroupReports(group, students, period) {
       where: { groups: { some: { groupId: group.id } }, deadline: dateRange },
       orderBy: [{ deadline: "asc" }, { id: "asc" }],
       select: {
-        id: true, title: true, deadline: true, gradeOutOf: true,
+        id: true, title: true, deadline: true, gradeOutOf: true, taskType: true,
         submissions: {
           where: { studentId: { in: studentIds } },
           select: { studentId: true, grade: true, submittedAt: true },
         },
       },
     }),
-    prisma.quiz.findMany({
-      where: {
-        groups: { some: { groupId: group.id } },
-        status: { in: ["PUBLISHED", "CLOSED"] },
-        OR: [
-          { startAt: dateRange },
-          { startAt: null, publishedAt: dateRange },
-        ],
-      },
-      orderBy: [{ startAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true, title: true, type: true, startAt: true, publishedAt: true,
-        totalPoints: true,
-        questions: { select: { points: true } },
-        submissions: {
-          where: { studentId: { in: studentIds }, isSubmitted: true },
-          select: { studentId: true, score: true, isGraded: true, submittedAt: true },
-        },
-      },
-    }),
-    prisma.inClassQuiz.findMany({
-      where: { groupId: group.id, date: dateRange },
-      orderBy: [{ date: "asc" }, { id: "asc" }],
-      select: {
-        id: true, quizName: true, date: true, gradeOutOf: true, studentGrades: true,
-      },
-    }),
   ]);
 
-  return students.map((student) => ({
-    student,
-    group: { name: group.name, yearName: group.year.name },
-    period,
-    attendance: sessions.map((session) => {
-      const record = session.attendance.find((item) => item.studentId === student.id);
-      return {
-        title: session.title,
-        date: session.date,
-        status: record?.status || "NOT_MARKED",
-      };
-    }),
-    tasks: tasks.map((task) => {
+  return students.map((student) => {
+    const taskResults = tasks.map((task) => {
       const submission = task.submissions.find((item) => item.studentId === student.id);
       return {
         title: task.title,
@@ -141,32 +103,28 @@ async function loadGroupReports(group, students, period) {
         submitted: Boolean(submission),
         grade: submission?.grade ?? null,
         gradeOutOf: task.gradeOutOf,
+        taskType: task.taskType || "HOMEWORK",
       };
-    }),
-    quizzes: quizzes.map((quiz) => {
-      const submission = quiz.submissions.find((item) => item.studentId === student.id);
-      const points = quiz.questions.reduce((total, question) => total + Number(question.points || 0), 0);
+    });
+
+    return {
+      student,
+      group: { name: group.name, yearName: group.year.name },
+      period,
+      attendance: sessions.map((session) => {
+      const record = session.attendance.find((item) => item.studentId === student.id);
       return {
-        title: quiz.title,
-        date: quiz.startAt || quiz.publishedAt,
-        attempted: Boolean(submission),
-        score: submission
-          ? quiz.type === "PAPER" && !submission.isGraded ? null : submission.score
-          : null,
-        total: Number(quiz.totalPoints) > 0 ? quiz.totalPoints : points,
+        title: session.title,
+        date: session.date,
+        status: record?.status || "NOT_MARKED",
       };
-    }),
-    inClassQuizzes: inClassQuizzes.map((quiz) => {
-      const grades = Array.isArray(quiz.studentGrades) ? quiz.studentGrades : [];
-      const record = grades.find((item) => item.studentId === student.id);
-      return {
-        title: quiz.quizName,
-        date: quiz.date,
-        grade: record?.grade ?? null,
-        gradeOutOf: quiz.gradeOutOf,
-      };
-    }),
-  }));
+      }),
+      homework: taskResults.filter((item) => item.taskType === "HOMEWORK"),
+      inClassQuizzes: taskResults.filter(
+        (item) => item.taskType === "IN_CLASS_QUIZ",
+      ),
+    };
+  });
 }
 
 function fitText(text, font, size, width) {
@@ -243,17 +201,15 @@ async function createStudentReportPdf(report) {
 
   const marked = report.attendance.filter((item) => item.status !== "NOT_MARKED");
   const present = marked.filter((item) => item.status === "PRESENT").length;
-  const submitted = report.tasks.filter((item) => item.submitted).length;
-  const attempted = report.quizzes.filter((item) => item.attempted).length;
-  const graded = report.inClassQuizzes.filter((item) => item.grade != null).length;
+  const submittedHomework = report.homework.filter((item) => item.submitted).length;
+  const submittedInClass = report.inClassQuizzes.filter((item) => item.submitted).length;
   const cards = [
     ["ATTENDANCE", `${present}/${marked.length}`, `${report.attendance.length - marked.length} not marked`],
-    ["TASKS", `${submitted}/${report.tasks.length}`, "submitted"],
-    ["QUIZZES", `${attempted}/${report.quizzes.length}`, "attempted"],
-    ["IN-CLASS", `${graded}/${report.inClassQuizzes.length}`, "graded"],
+    ["HOMEWORK", `${submittedHomework}/${report.homework.length}`, "submitted"],
+    ["IN-CLASS QUIZ", `${submittedInClass}/${report.inClassQuizzes.length}`, "submitted"],
   ];
   const gap = 10;
-  const cardWidth = (PAGE_WIDTH - 2 * MARGIN - 3 * gap) / 4;
+  const cardWidth = (PAGE_WIDTH - 2 * MARGIN - (cards.length - 1) * gap) / cards.length;
   cards.forEach(([label, value, helper], index) => {
     const x = MARGIN + index * (cardWidth + gap);
     page.drawRectangle({ x, y: y - 75, width: cardWidth, height: 75, color: rgb(1, 1, 1), borderColor: BORDER, borderWidth: 0.8 });
@@ -296,24 +252,19 @@ async function createStudentReportPdf(report) {
     result: item.status === "PRESENT" ? "Present" : item.status === "ABSENT" ? "Absent" : "Not marked",
     positive: item.status === "PRESENT",
   })));
-  section("Tasks", "Based on each task deadline", report.tasks.map((item) => ({
+  section("Homework", "Based on each task deadline", report.homework.map((item) => ({
     ...item,
     result: item.submitted
       ? item.grade != null ? `${item.grade}/${item.gradeOutOf}` : "Submitted"
       : "Not submitted",
     positive: item.submitted,
   })));
-  section("Quizzes", "Based on quiz start or publication date", report.quizzes.map((item) => ({
+  section("In-class quizzes", "Based on each task deadline", report.inClassQuizzes.map((item) => ({
     ...item,
-    result: item.attempted
-      ? item.score != null ? `${item.score}/${item.total}` : "Pending grade"
-      : "Not attempted",
-    positive: item.attempted,
-  })));
-  section("In-class quizzes", "Based on the in-class quiz date", report.inClassQuizzes.map((item) => ({
-    ...item,
-    result: item.grade != null ? `${item.grade}/${item.gradeOutOf}` : "Not graded",
-    positive: item.grade != null,
+    result: item.submitted
+      ? item.grade != null ? `${item.grade}/${item.gradeOutOf}` : "Submitted"
+      : "Not submitted",
+    positive: item.submitted,
   })));
 
   document.setTitle(`${report.student.name} - Report - ${report.period.startDate} to ${report.period.endDate}`);

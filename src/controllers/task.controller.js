@@ -1,4 +1,8 @@
 const taskService = require("../services/task.service");
+const {
+  TASK_TYPES,
+  normalizeTaskType,
+} = require("../services/taskType.service");
 
 function parseGroupIds(value) {
   if (Array.isArray(value)) {
@@ -102,6 +106,10 @@ async function createTask(req, res) {
     );
 
     const deadline = validateDeadline(req.body.deadline);
+    const taskType = normalizeTaskType(
+      req.body.taskType,
+      TASK_TYPES.HOMEWORK,
+    );
 
     if (groupIds.length === 0) {
       return res.status(400).json({
@@ -114,6 +122,7 @@ async function createTask(req, res) {
       description: req.body.description?.trim() || null,
       groupIds,
       gradeOutOf,
+      taskType,
       allowLateSubmission,
       deadline,
       yearId: req.body.yearId,
@@ -169,6 +178,12 @@ async function updateTask(req, res) {
     if (req.body.gradeOutOf !== undefined) {
       updateData.gradeOutOf = parseGradeOutOf(
         req.body.gradeOutOf,
+      );
+    }
+
+    if (req.body.taskType !== undefined) {
+      updateData.taskType = normalizeTaskType(
+        req.body.taskType,
       );
     }
 

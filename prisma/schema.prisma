@@ -860,6 +860,11 @@ model LiveQuestionAnswer {
 
 // ---------------- Homework / Tasks / Delegation ----------------
 
+enum TaskType {
+  HOMEWORK
+  IN_CLASS_QUIZ
+}
+
 model Task {
   id                  String   @id @default(uuid())
   title               String
@@ -869,6 +874,7 @@ model Task {
   yearId              String
   deadline            DateTime
   gradeOutOf          Float
+  taskType            TaskType @default(HOMEWORK)
   // Optional PDF of the homework itself, uploaded by teacher/assistant (req: student
   // sees instructions + this file, if provided).
   taskFileUrl         String?
@@ -880,6 +886,8 @@ model Task {
   groups         TaskGroup[]
   submissions    Submission[]
   aiGradingPacks TaskAIGradingPack[]
+
+  @@index([taskType])
 }
 
 model TaskGroup {
