@@ -449,7 +449,23 @@ async function autoDelegateSubmission({
     },
   });
 
-  const assignmentDecision = evaluateAssistantAssignments(assignments);
+  const hardcopyMarker =
+    submission.submissionMethod === "HARDCOPY" &&
+    submission.hardcopyMarkedById
+      ? assignments
+          .map(({ assistant }) => assistant)
+          .find(
+            (assistant) =>
+              assistant?.id === submission.hardcopyMarkedById &&
+              assistant.role === "ASSISTANT" &&
+              (assistant.isHeadAssistant === true ||
+                assistant.permissions?.canGradeHomework === true),
+          )
+      : null;
+
+  const assignmentDecision = hardcopyMarker
+    ? { assistant: hardcopyMarker, reason: null }
+    : evaluateAssistantAssignments(assignments);
 
   if (!assignmentDecision.assistant) {
     return {
@@ -465,8 +481,9 @@ async function autoDelegateSubmission({
     assistantId: assistant.id,
     delegatedById: submission.task.teacherId,
     groupId,
-    reason:
-      "Automatically delegated because this group has one eligible assistant.",
+    reason: hardcopyMarker
+      ? "Automatically delegated to the assistant who recorded the hardcopy submission."
+      : "Automatically delegated because this group has one eligible assistant.",
     skipNotification: true,
   });
 
@@ -475,7 +492,9 @@ async function autoDelegateSubmission({
       assistant: delegation.assistant,
       submission,
       title: "Homework automatically assigned for grading",
-      body: `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
+      body: hardcopyMarker
+        ? `${submission.student?.name || "A student"}'s hardcopy for ${submission.task?.title || "homework"} was assigned to you for grading.`
+        : `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
     }).catch((error) => {
       console.error(
         "Automatic delegation notification failed:",
