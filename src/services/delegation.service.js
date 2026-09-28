@@ -37,6 +37,17 @@ function normalizeReason(reason) {
   return normalized || null;
 }
 
+function getTaskTypeLabel(task, { capitalize = false } = {}) {
+  const label =
+    task?.taskType === "IN_CLASS_QUIZ"
+      ? "in-class quiz"
+      : "homework";
+
+  return capitalize
+    ? `${label.charAt(0).toUpperCase()}${label.slice(1)}`
+    : label;
+}
+
 async function getSubmissionForDelegation(
   submissionId,
 ) {
@@ -365,16 +376,19 @@ async function delegateSubmission({
     );
 
   if (!skipNotification) {
+    const taskTypeLabel = getTaskTypeLabel(submission.task);
+
     await notifyAssistantOfDelegation({
       assistant,
 
       submission,
 
-      title:
-        "Homework assigned for grading",
+      title: `${getTaskTypeLabel(submission.task, {
+        capitalize: true,
+      })} assigned for grading`,
 
       body:
-        `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"} for you to grade.`,
+        `${submission.student?.name || "A student"} submitted ${submission.task?.title || taskTypeLabel} for you to grade.`,
     });
   }
 
@@ -382,9 +396,10 @@ async function delegateSubmission({
 }
 
 /**
- * Automatically delegates a new submission only when its student belongs to
- * exactly one of the task's groups and that group has exactly one assigned
- * assistant who can grade homework. Every ambiguous case remains undelegated.
+ * Automatically delegates a new Homework or In-Class Quiz submission only
+ * when its student belongs to exactly one of the task's groups and that group
+ * has exactly one assigned assistant who can grade it. Every ambiguous case
+ * remains undelegated.
  */
 async function autoDelegateSubmission({
   submissionId,
@@ -402,12 +417,14 @@ async function autoDelegateSubmission({
   }
 
   if (
-    submission.task.taskType !== "HOMEWORK" &&
+    !["HOMEWORK", "IN_CLASS_QUIZ"].includes(
+      submission.task.taskType,
+    ) &&
     submission.submissionMethod !== "HARDCOPY"
   ) {
     return {
       delegated: false,
-      reason: "NOT_HOMEWORK",
+      reason: "UNSUPPORTED_TASK_TYPE",
     };
   }
 
@@ -491,13 +508,17 @@ async function autoDelegateSubmission({
   });
 
   if (!skipNotification) {
+    const taskTypeLabel = getTaskTypeLabel(submission.task);
+
     notifyAssistantOfDelegation({
       assistant: delegation.assistant,
       submission,
-      title: "Homework automatically assigned for grading",
+      title: `${getTaskTypeLabel(submission.task, {
+        capitalize: true,
+      })} automatically assigned for grading`,
       body: hardcopyMarker
-        ? `${submission.student?.name || "A student"}'s hardcopy for ${submission.task?.title || "homework"} was assigned to you for grading.`
-        : `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
+        ? `${submission.student?.name || "A student"}'s hardcopy for ${submission.task?.title || taskTypeLabel} was assigned to you for grading.`
+        : `${submission.student?.name || "A student"} submitted ${submission.task?.title || taskTypeLabel}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
     }).catch((error) => {
       console.error(
         "Automatic delegation notification failed:",
@@ -516,8 +537,8 @@ async function autoDelegateSubmission({
 }
 
 /**
- * Reconciles existing ungraded Homework submissions and all hardcopy
- * submissions that have no delegation.
+ * Reconciles existing ungraded Homework and In-Class Quiz submissions, plus
+ * all hardcopy submissions, that have no delegation.
  * A group filter is used after assignment changes; without one this performs
  * the startup backfill. Notifications are grouped to avoid one email per paper.
  */
@@ -528,7 +549,13 @@ async function autoDelegateUndelegatedSubmissions({ groupId } = {}) {
       delegation: null,
       OR: [
         { submissionMethod: "HARDCOPY" },
-        { task: { taskType: "HOMEWORK" } },
+        {
+          task: {
+            taskType: {
+              in: ["HOMEWORK", "IN_CLASS_QUIZ"],
+            },
+          },
+        },
       ],
       ...(groupId
         ? {
@@ -597,15 +624,19 @@ async function autoDelegateUndelegatedSubmissions({ groupId } = {}) {
   }
 
   await Promise.allSettled(
-    [...notificationGroups.values()].map(({ assistant, submission, count }) =>
-      notifyAssistantOfDelegation({
+    [...notificationGroups.values()].map(({ assistant, submission, count }) => {
+      const taskTypeLabel = getTaskTypeLabel(submission.task);
+
+      return notifyAssistantOfDelegation({
         assistant,
         submission,
         count,
-        title: "Homework automatically assigned for grading",
-        body: `${submission.student?.name || "A student"} submitted ${submission.task?.title || "homework"}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
-      }),
-    ),
+        title: `${getTaskTypeLabel(submission.task, {
+          capitalize: true,
+        })} automatically assigned for grading`,
+        body: `${submission.student?.name || "A student"} submitted ${submission.task?.title || taskTypeLabel}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
+      });
+    }),
   );
 
   return {

@@ -79,6 +79,7 @@ async function alertAdminsOfHomeworkSubmission(submissionId) {
         select: {
           id: true,
           title: true,
+          taskType: true,
           yearId: true,
           groups: { select: { groupId: true, group: { select: { name: true } } } },
         },
@@ -109,11 +110,14 @@ async function alertAdminsOfHomeworkSubmission(submissionId) {
   const groupLabel = (groupNames.length ? groupNames : fallbackGroups).join(", ") || "Unassigned group";
   const yearLabel = year?.name || "Unknown year";
   const automaticAssistantName = submission.delegation?.assistant?.name;
+  const taskTypeLabel = submission.task.taskType === "IN_CLASS_QUIZ"
+    ? "In-class quiz"
+    : "Homework";
   const message = {
-    eyebrow: "Homework submitted",
+    eyebrow: `${taskTypeLabel} submitted`,
     title: automaticAssistantName
-      ? "Homework automatically delegated"
-      : "Homework needs delegation",
+      ? `${taskTypeLabel} automatically delegated`
+      : `${taskTypeLabel} needs delegation`,
     body: automaticAssistantName
       ? `${submission.student.name} submitted ${submission.task.title} (${yearLabel} · ${groupLabel}). It was automatically delegated to ${automaticAssistantName} for correction.`
       : `${submission.student.name} submitted ${submission.task.title} (${yearLabel} · ${groupLabel}). Please delegate it to an assistant for correction.`,
@@ -124,13 +128,16 @@ async function alertAdminsOfHomeworkSubmission(submissionId) {
 }
 
 async function alertAssistantOfDelegation({ assistant, submission, title, body, count }) {
-  const taskTitle = submission?.task?.title || "homework";
+  const taskTypeLabel = submission?.task?.taskType === "IN_CLASS_QUIZ"
+    ? "in-class quiz"
+    : "homework";
+  const taskTitle = submission?.task?.title || taskTypeLabel;
   await deliver(assistant, {
-    eyebrow: "Homework delegation",
+    eyebrow: `${taskTypeLabel.charAt(0).toUpperCase()}${taskTypeLabel.slice(1)} delegation`,
     title,
     body,
     emailMessage: count > 1
-      ? `${count} homework submissions for ${taskTitle} have been delegated to you for correction.`
+      ? `${count} ${taskTypeLabel} submissions for ${taskTitle} have been delegated to you for correction.`
       : body,
     link: submission?.taskId ? `/tasks/${submission.taskId}` : "/tasks",
     buttonLabel: "Open delegated submissions",
