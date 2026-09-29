@@ -69,6 +69,76 @@ async function markHardcopySubmission(req, res) {
   }
 }
 
+async function removeHardcopySubmission(req, res) {
+  try {
+    const result = await submissionService.removeHardcopySubmission({
+      submissionId: req.params.submissionId,
+      requestedBy: req.user,
+    });
+
+    return res.json({
+      msg: "Hardcopy submission removed.",
+      ...result,
+    });
+  } catch (error) {
+    return sendError(res, error, "Error removing hardcopy submission.");
+  }
+}
+
+async function prepareStudentUploadsByStaff(req, res) {
+  try {
+    const uploads = await submissionService.prepareStudentUploadsByStaff({
+      taskId: req.params.taskId,
+      studentId: req.params.studentId,
+      files: req.body.files,
+      requestedBy: req.user,
+    });
+
+    return res.json({
+      msg: "Secure student upload prepared.",
+      uploads,
+    });
+  } catch (error) {
+    return sendError(res, error, "Error preparing student upload.");
+  }
+}
+
+async function confirmStudentUploadsByStaff(req, res) {
+  try {
+    const result = await submissionService.confirmStudentUploadsByStaff({
+      taskId: req.params.taskId,
+      studentId: req.params.studentId,
+      uploads: req.body.uploads,
+      requestedBy: req.user,
+    });
+
+    return res.status(201).json({
+      msg: "Student submission uploaded successfully.",
+      submission: result.submission,
+    });
+  } catch (error) {
+    return sendError(res, error, "Error confirming student upload.");
+  }
+}
+
+async function abortStudentUploadsByStaff(req, res) {
+  try {
+    const result = await submissionService.abortStudentUploadsByStaff({
+      taskId: req.params.taskId,
+      studentId: req.params.studentId,
+      objectKeys: req.body.objectKeys,
+      requestedBy: req.user,
+    });
+
+    return res.json({
+      msg: "Unfinished student upload removed.",
+      ...result,
+    });
+  } catch (error) {
+    return sendError(res, error, "Error cancelling student upload.");
+  }
+}
+
 async function prepareHomeworkUploads(
   req,
   res,
@@ -337,6 +407,10 @@ async function getGradingHistory(
 
 module.exports = {
   markHardcopySubmission,
+  removeHardcopySubmission,
+  prepareStudentUploadsByStaff,
+  confirmStudentUploadsByStaff,
+  abortStudentUploadsByStaff,
   submitHomework,
   prepareHomeworkUploads,
   confirmHomeworkUploads,

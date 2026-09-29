@@ -25,6 +25,30 @@ router.post(
   submissionController.markHardcopySubmission,
 );
 
+router.delete(
+  "/:submissionId/hardcopy",
+  requireAssistantPermission("canGradeHomework"),
+  submissionController.removeHardcopySubmission,
+);
+
+router.post(
+  "/task/:taskId/student/:studentId/uploads/prepare",
+  requireAssistantPermission("canGradeHomework"),
+  submissionController.prepareStudentUploadsByStaff,
+);
+
+router.post(
+  "/task/:taskId/student/:studentId/uploads/confirm",
+  requireAssistantPermission("canGradeHomework"),
+  submissionController.confirmStudentUploadsByStaff,
+);
+
+router.post(
+  "/task/:taskId/student/:studentId/uploads/abort",
+  requireAssistantPermission("canGradeHomework"),
+  submissionController.abortStudentUploadsByStaff,
+);
+
 router.post(
   "/task/:taskId",
   requireRole("STUDENT"),

@@ -216,6 +216,51 @@ async function getTaskForStudent({
   return task;
 }
 
+async function assertStaffCanActForStudentTask({
+  taskId,
+  studentId,
+  requestedBy,
+}) {
+  if (
+    !requestedBy?.id ||
+    !["TEACHER", "ASSISTANT"].includes(requestedBy.role)
+  ) {
+    throw createServiceError(403, "Only teaching staff can manage a student's submission.");
+  }
+
+  const task = await getTaskForStudent({ taskId, studentId });
+
+  if (
+    requestedBy.role === "TEACHER" ||
+    requestedBy.isHeadAssistant === true
+  ) {
+    return task;
+  }
+
+  const taskGroupIds = task.groups.map(({ groupId }) => String(groupId));
+  const accessibleMembership = await prisma.groupMembership.findFirst({
+    where: {
+      studentId,
+      groupId: { in: taskGroupIds },
+      group: {
+        assistantAssignments: {
+          some: { assistantId: requestedBy.id },
+        },
+      },
+    },
+    select: { groupId: true },
+  });
+
+  if (!accessibleMembership) {
+    throw createServiceError(
+      403,
+      "You are not assigned to this student's task group.",
+    );
+  }
+
+  return task;
+}
+
 function getModificationState(
   task,
   now = new Date(),
@@ -439,6 +484,112 @@ async function markHardcopySubmission({
   }
 
   return mapSubmission(await findStudentSubmission({ taskId, studentId }));
+}
+
+async function removeHardcopySubmission({ submissionId, requestedBy }) {
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    select: {
+      id: true,
+      taskId: true,
+      studentId: true,
+      submissionMethod: true,
+      grade: true,
+      correctedFileUrl: true,
+      _count: {
+        select: {
+          correctedFiles: true,
+          gradingHistory: true,
+        },
+      },
+    },
+  });
+
+  if (!submission) {
+    throw createServiceError(404, "Submission not found.");
+  }
+
+  if (submission.submissionMethod !== "HARDCOPY") {
+    throw createServiceError(409, "Only a hardcopy submission can be removed here.");
+  }
+
+  await assertStaffCanActForStudentTask({
+    taskId: submission.taskId,
+    studentId: submission.studentId,
+    requestedBy,
+  });
+
+  if (
+    submission.grade !== null ||
+    submission.correctedFileUrl ||
+    submission._count.correctedFiles > 0 ||
+    submission._count.gradingHistory > 0
+  ) {
+    throw createServiceError(
+      409,
+      "This hardcopy already has grading or corrected-file history and cannot be removed.",
+    );
+  }
+
+  await prisma.submission.delete({ where: { id: submission.id } });
+
+  return {
+    removedSubmissionId: submission.id,
+    studentId: submission.studentId,
+  };
+}
+
+async function prepareStudentUploadsByStaff({
+  taskId,
+  studentId,
+  files,
+  requestedBy,
+}) {
+  await assertStaffCanActForStudentTask({ taskId, studentId, requestedBy });
+
+  const existing = await findStudentSubmission({ taskId, studentId });
+  if (existing) {
+    throw createServiceError(
+      409,
+      "This student already has a submission for this task.",
+    );
+  }
+
+  return prepareHomeworkUploads({ taskId, studentId, files });
+}
+
+async function confirmStudentUploadsByStaff({
+  taskId,
+  studentId,
+  uploads,
+  requestedBy,
+}) {
+  await assertStaffCanActForStudentTask({ taskId, studentId, requestedBy });
+
+  const existing = await findStudentSubmission({ taskId, studentId });
+  if (existing) {
+    throw createServiceError(
+      409,
+      "This student already has a submission for this task.",
+    );
+  }
+
+  return confirmHomeworkUploads({
+    taskId,
+    studentId,
+    uploads,
+    uploadedById: requestedBy.id,
+  });
+}
+
+async function abortStudentUploadsByStaff({
+  taskId,
+  studentId,
+  objectKeys,
+  requestedBy,
+}) {
+  await assertStaffCanActForStudentTask({ taskId, studentId, requestedBy });
+  return abortHomeworkUploads({ taskId, studentId, objectKeys });
 }
 
 function getHomeworkUploadPrefix(
@@ -723,6 +874,7 @@ async function confirmHomeworkUploads({
   taskId,
   studentId,
   uploads,
+  uploadedById = studentId,
 }) {
   const normalizedUploads =
     normalizeScopedObjectKeys({
@@ -964,8 +1116,7 @@ async function confirmHomeworkUploads({
                     file.uploadedAfterDeadline,
                   uploadedAt:
                     file.uploadedAt,
-                  uploadedById:
-                    studentId,
+                  uploadedById,
                 },
               }),
           ),
@@ -2655,6 +2806,10 @@ async function deleteCorrectedFile({
 
 module.exports = {
   markHardcopySubmission,
+  removeHardcopySubmission,
+  prepareStudentUploadsByStaff,
+  confirmStudentUploadsByStaff,
+  abortStudentUploadsByStaff,
   submitHomework,
   prepareHomeworkUploads,
   confirmHomeworkUploads,
