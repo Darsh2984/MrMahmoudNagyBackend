@@ -45,25 +45,45 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, ta
 
   const isHeadAssistant =
     user?.role === "ASSISTANT" && user?.isHeadAssistant === true;
+  let effectiveGroupIds = groupIds;
 
   if (user?.role === "ASSISTANT" && !isHeadAssistant) {
     const currentGroupIds = task.groups.map(({ groupId }) => groupId);
-    const requestedGroupIds = groupIds || currentGroupIds;
-    const groupIdsToCheck = [...new Set([...currentGroupIds, ...requestedGroupIds])];
 
     const assignmentCount = await prisma.assistantGroupAssignment.count({
       where: {
         assistantId: user.id,
-        groupId: { in: groupIdsToCheck },
+        groupId: { in: currentGroupIds },
       },
     });
 
-    if (assignmentCount !== groupIdsToCheck.length) {
+    if (assignmentCount === 0) {
       throw {
         status: 403,
-        msg: "You can only edit tasks for groups assigned to you",
+        msg: "You can only edit tasks assigned to at least one of your groups",
       };
     }
+
+    if (groupIds !== undefined) {
+      const currentGroupIdSet = new Set(currentGroupIds.map(String));
+      const requestedGroupIdSet = new Set(groupIds.map(String));
+      const groupsAreUnchanged =
+        currentGroupIdSet.size === requestedGroupIdSet.size &&
+        [...currentGroupIdSet].every((groupId) =>
+          requestedGroupIdSet.has(groupId),
+        );
+
+      if (!groupsAreUnchanged) {
+        throw {
+          status: 403,
+          msg: "You can edit this shared task, but only the teacher or head assistant can change its assigned groups",
+        };
+      }
+    }
+
+    // A regular assistant edits the one shared task record. Keep its group
+    // assignments untouched, including groups managed by other assistants.
+    effectiveGroupIds = undefined;
   }
 
   let taskFileUrl = task.taskFileUrl;
@@ -84,11 +104,11 @@ async function updateTask(taskId, { title, description, deadline, gradeOutOf, ta
         ...(gradeOutOf !== undefined ? { gradeOutOf } : {}),
         ...(taskType !== undefined ? { taskType } : {}),
         ...(allowLateSubmission !== undefined ? { allowLateSubmission } : {}),
-        ...(groupIds !== undefined
+        ...(effectiveGroupIds !== undefined
           ? {
               groups: {
                 deleteMany: {},
-                create: groupIds.map((groupId) => ({ groupId })),
+                create: effectiveGroupIds.map((groupId) => ({ groupId })),
               },
             }
           : {}),
