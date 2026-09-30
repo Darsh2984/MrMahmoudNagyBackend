@@ -273,6 +273,7 @@ model Group {
   yearId      String
   year        Year     @relation(fields: [yearId], references: [id])
   sessionLink String?
+  sessionLinks Json?   // [{ id, title, link }]
   createdAt   DateTime @default(now())
 
   members              GroupMembership[]

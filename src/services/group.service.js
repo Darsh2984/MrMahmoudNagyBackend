@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { randomUUID } = require("crypto");
 const studentSupportChatService = require("./studentSupportChat.service");
 const { resolveTeacherId } = require("../utils/resolveTeacher");
 
@@ -242,6 +243,64 @@ function normalizeSessionLink(value) {
   return trimmed;
 }
 
+function normalizeSessionLinks(value) {
+  if (!Array.isArray(value)) {
+    throw {
+      status: 400,
+      msg: "Session links must be provided as a list.",
+    };
+  }
+
+  if (value.length > 20) {
+    throw {
+      status: 400,
+      msg: "A group can have a maximum of 20 session links.",
+    };
+  }
+
+  const normalized = value.map((item, index) => {
+    const title = String(item?.title || "").trim();
+    const link = normalizeSessionLink(item?.link);
+
+    if (!title) {
+      throw {
+        status: 400,
+        msg: `Add a title for session link ${index + 1}.`,
+      };
+    }
+
+    if (title.length > 100) {
+      throw {
+        status: 400,
+        msg: `Session link ${index + 1} has a title longer than 100 characters.`,
+      };
+    }
+
+    if (!link) {
+      throw {
+        status: 400,
+        msg: `Add a URL for session link ${index + 1}.`,
+      };
+    }
+
+    return {
+      id: String(item?.id || randomUUID()),
+      title,
+      link,
+    };
+  });
+
+  const uniqueIds = new Set(normalized.map(({ id }) => id));
+  if (uniqueIds.size !== normalized.length) {
+    throw {
+      status: 400,
+      msg: "Each session link must have a unique identifier.",
+    };
+  }
+
+  return normalized;
+}
+
 async function updateGroupSessionLink(
   groupId,
   sessionLink
@@ -255,6 +314,7 @@ async function updateGroupSessionLink(
         id: true,
         name: true,
         sessionLink: true,
+        sessionLinks: true,
       },
     });
 
@@ -268,6 +328,21 @@ async function updateGroupSessionLink(
   const normalizedSessionLink =
     normalizeSessionLink(sessionLink);
 
+  const existingLinks = Array.isArray(group.sessionLinks)
+    ? group.sessionLinks
+    : [];
+
+  const synchronizedLinks = normalizedSessionLink
+    ? [
+        {
+          id: String(existingLinks[0]?.id || randomUUID()),
+          title: String(existingLinks[0]?.title || "Online session"),
+          link: normalizedSessionLink,
+        },
+        ...existingLinks.slice(1),
+      ]
+    : [];
+
   return prisma.group.update({
     where: {
       id: groupId,
@@ -275,6 +350,29 @@ async function updateGroupSessionLink(
     data: {
       sessionLink:
         normalizedSessionLink,
+      sessionLinks: synchronizedLinks,
+    },
+  });
+}
+
+async function updateGroupSessionLinks(groupId, sessionLinks) {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { id: true },
+  });
+
+  if (!group) {
+    throw { status: 404, msg: "Group not found." };
+  }
+
+  const normalizedSessionLinks = normalizeSessionLinks(sessionLinks);
+
+  return prisma.group.update({
+    where: { id: groupId },
+    data: {
+      sessionLinks: normalizedSessionLinks,
+      // Keep the legacy field synchronized for older app builds.
+      sessionLink: normalizedSessionLinks[0]?.link || null,
     },
   });
 }
@@ -527,4 +625,5 @@ module.exports = {
   addStudentsToGroup,
   removeStudentFromGroup,
   updateGroupSessionLink,
+  updateGroupSessionLinks,
 };

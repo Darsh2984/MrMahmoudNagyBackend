@@ -91,6 +91,8 @@ async function getStudentProfile(studentId) {
               select: {
                 id: true,
                 name: true,
+                sessionLink: true,
+                sessionLinks: true,
                 year: {
                   select: {
                     id: true,

@@ -145,6 +145,25 @@ async function updateSessionLink(req, res) {
   }
 }
 
+async function updateSessionLinks(req, res) {
+  try {
+    const group = await groupService.updateGroupSessionLinks(
+      req.params.groupId,
+      req.body.sessionLinks,
+    );
+
+    return res.json({
+      msg: "Session links updated.",
+      group,
+    });
+  } catch (error) {
+    console.error("updateSessionLinks error:", error);
+    return res.status(error.status || 500).json({
+      msg: error.msg || error.message || "Failed to update session links.",
+    });
+  }
+}
+
 module.exports = {
   createGroup,
   listGroupsByYear,
@@ -154,4 +173,5 @@ module.exports = {
   addStudent,
   removeStudent,
   updateSessionLink,
+  updateSessionLinks,
 };
