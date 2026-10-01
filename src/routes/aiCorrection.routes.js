@@ -26,6 +26,7 @@ router.post("/tasks/:taskId/references", requireAssistantPermission("canGradeHom
   taskController.authorizeTask, taskAIReferencesUpload, taskController.uploadPack);
 router.post("/tasks/:taskId/references/retry", requireAssistantPermission("canGradeHomework"), taskController.retryPack);
 router.post("/tasks/:taskId/references/approve", requireAssistantPermission("canGradeHomework"), taskController.approvePack);
+router.patch("/tasks/:taskId/references/total", requireAssistantPermission("canGradeHomework"), taskController.updatePackTotal);
 router.get("/submissions/:submissionId", requireRole("TEACHER", "ASSISTANT"), taskController.getCorrections);
 router.post("/submissions/:submissionId", requireAssistantPermission("canGradeHomework"), taskController.startCorrection);
 router.patch("/submissions/:submissionId/corrections/:correctionId", requireAssistantPermission("canGradeHomework"), taskController.saveCorrectionReview);

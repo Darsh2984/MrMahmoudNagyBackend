@@ -64,6 +64,12 @@ test("totals are calculated from authoritative rubric and validated per-question
   assert.equal(correction.totalAwarded, 3);
   assert.equal(correction.totalPossible, 5);
   assert.equal(correction.percentage, 60);
+
+  const staffOverride = { ...rubric, totalPossible: 10, totalPossibleSource: "STAFF_OVERRIDE" };
+  const overriddenCorrection = validateCorrection(result(), staffOverride);
+  assert.equal(overriddenCorrection.totalAwarded, 3);
+  assert.equal(overriddenCorrection.totalPossible, 10);
+  assert.equal(overriddenCorrection.percentage, 30);
 });
 test("missing, duplicate and unknown questions cannot become saved corrections", () => {
   assert.throws(() => validateCorrection({ ...result(), questionBreakdown: [answer("1(a)", 1)] }, rubric));
@@ -88,7 +94,13 @@ test("rubric rejects duplicate labels and empty/invalid scoring", () => {
 // Stub persistence and storage: no database, R2 requests, or paid AI calls in these tests.
 let assigned = 1;
 let delegation = { assistantId: "assistant" };
-let activePack = { id: "pack", taskId: "task", status: "READY", approvedAt: new Date(), activatedAt: new Date(), rubric };
+let activePack = {
+  id: "pack", taskId: "task", sourceHash: "original-source", status: "READY",
+  approvedAt: new Date(), activatedAt: new Date(), createdAt: new Date(), rubric,
+  questionPaperKey: "private/question.pdf", questionPaperName: "question.pdf",
+  markSchemeKey: "private/scheme.pdf", markSchemeName: "scheme.pdf",
+  model: "test-model", uploadedById: "teacher", uploadedByName: "Teacher", usage: null,
+};
 let submissionMethod = "ONLINE";
 const submission = () => ({ id: "submission", taskId: "task", submissionMethod, files: [
   { id: "answer", objectKey: "private/answer.pdf", originalName: "answer.pdf", contentType: "application/pdf", size: 10, uploadedAt: new Date("2026-09-18T10:00:00Z") },
@@ -100,7 +112,18 @@ const prisma = {
   task: { findUnique: async () => ({ id: "task", teacherId: "teacher", groups: [{ groupId: "group" }] }) },
   assistantGroupAssignment: { count: async () => assigned },
   submission: { findUnique: async () => ({ ...submission(), files: [...submission().files, ...extraFiles] }) },
-  taskAIGradingPack: { updateMany: async () => ({ count: 0 }), findFirst: async () => activePack },
+  taskAIGradingPack: {
+    updateMany: async () => ({ count: 0 }),
+    findFirst: async () => activePack,
+    create: async ({ data }) => {
+      activePack = {
+        id: "staff-total-pack", createdAt: new Date(), activatedAt: new Date(),
+        approvedAt: null, approvedById: null, approvedByName: null, error: null,
+        ...data,
+      };
+      return activePack;
+    },
+  },
   submissionAICorrection: {
     updateMany: async () => ({ count: 0 }), findMany: async () => savedCorrections,
     create: async () => { throw Object.assign(new Error("Existing"), { code: "P2002" }); },
@@ -129,6 +152,29 @@ test("regular assistants require group assignment and submission delegation", as
   delegation = null;
   await assert.rejects(service.listCorrections("submission", assistant), error => error.status === 403);
   delegation = { assistantId: "assistant" };
+});
+test("staff can override the authoritative paper total without changing question marks", async () => {
+  const originalPack = activePack;
+  try {
+    const updated = await service.updatePackTotal("task", assistant, "pack", 10);
+    assert.equal(updated.id, "staff-total-pack");
+    assert.equal(updated.rubric.totalPossible, 10);
+    assert.equal(updated.rubric.calculatedQuestionMarksTotal, 5);
+    assert.equal(updated.rubric.totalPossibleSource, "STAFF_OVERRIDE");
+    assert.equal(updated.rubric.totalPossibleUpdatedByName, "Assistant");
+    assert.equal(updated.approvedAt, null);
+    assert.notEqual(activePack.sourceHash, originalPack.sourceHash);
+  } finally {
+    activePack = originalPack;
+  }
+});
+test("invalid authoritative totals are rejected", async () => {
+  for (const total of [0, -1, "not-a-number", Infinity, 10001]) {
+    await assert.rejects(
+      service.updatePackTotal("task", assistant, "pack", total),
+      error => error.status === 400,
+    );
+  }
 });
 test("saved results are private, hide R2 keys, and detect changed references/answers", async () => {
   savedCorrections = [{ id: "correction", packId: "old-pack", status: "COMPLETED", submissionVersion: "old-version", inputFiles: [{ id: "answer", name: "answer.pdf", objectKey: "private/key" }], result: validateCorrection(result(), rubric) }];

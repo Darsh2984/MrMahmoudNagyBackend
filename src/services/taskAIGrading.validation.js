@@ -91,7 +91,13 @@ function validateRubric(value) {
   });
   const totalPossible = questions.reduce((sum, item) => sum + item.possible, 0);
   if (totalPossible <= 0) invalid("The rubric has no available marks.");
-  return { questions, totalPossible, documentWarnings: strings(value.documentWarnings, "document warnings") };
+  return {
+    questions,
+    totalPossible,
+    calculatedQuestionMarksTotal: totalPossible,
+    totalPossibleSource: "AI_EXTRACTED",
+    documentWarnings: strings(value.documentWarnings, "document warnings"),
+  };
 }
 function validateCorrection(value, rubric) {
   if (!Array.isArray(value?.questionBreakdown)) invalid("AI returned no question-by-question feedback.");
@@ -120,6 +126,10 @@ function validateCorrection(value, rubric) {
     };
   });
   const totalAwarded = questionBreakdown.reduce((sum, item) => sum + item.awarded, 0);
+  const totalPossible = Number(rubric?.totalPossible);
+  if (!Number.isFinite(totalPossible) || totalPossible <= 0) {
+    invalid("The approved rubric has an invalid authoritative total.");
+  }
   return {
     summary: text(value.summary, "summary"),
     overallFeedback: text(value.overallFeedback, "overall feedback"),
@@ -127,8 +137,8 @@ function validateCorrection(value, rubric) {
     strengths: strings(value.strengths, "strengths"),
     weaknesses: strings(value.weaknesses, "weaknesses"),
     totalAwarded,
-    totalPossible: rubric.totalPossible,
-    percentage: Math.round(totalAwarded / rubric.totalPossible * 1000) / 10,
+    totalPossible,
+    percentage: Math.round(totalAwarded / totalPossible * 1000) / 10,
     questionBreakdown,
   };
 }

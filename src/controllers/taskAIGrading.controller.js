@@ -26,6 +26,18 @@ async function approvePack(req, res) {
   try { return res.json({ pack: await service.approvePack(req.params.taskId, req.user, req.body.packId) }); }
   catch (error) { return sendError(res, error); }
 }
+async function updatePackTotal(req, res) {
+  try {
+    return res.json({
+      pack: await service.updatePackTotal(
+        req.params.taskId,
+        req.user,
+        req.body.packId,
+        req.body.totalPossible,
+      ),
+    });
+  } catch (error) { return sendError(res, error); }
+}
 async function getCorrections(req, res) {
   try { return res.json(await service.listCorrections(req.params.submissionId, req.user)); }
   catch (error) { return sendError(res, error); }
@@ -65,6 +77,7 @@ module.exports = {
   uploadPack,
   retryPack,
   approvePack,
+  updatePackTotal,
   getCorrections,
   startCorrection,
   saveCorrectionReview,
