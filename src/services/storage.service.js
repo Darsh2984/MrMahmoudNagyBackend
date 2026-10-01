@@ -720,8 +720,10 @@ async function getSignedUrl(
       )
     ) * 60;
 
+  let metadata;
+
   try {
-    await r2.send(
+    metadata = await r2.send(
       new HeadObjectCommand({
         Bucket: bucketName,
         Key: normalizedObjectName,
@@ -731,11 +733,48 @@ async function getSignedUrl(
     handleStoredFileError(error);
   }
 
+  let originalName = path.basename(
+    normalizedObjectName,
+  );
+
+  if (metadata?.Metadata?.originalname) {
+    try {
+      originalName = decodeURIComponent(
+        metadata.Metadata.originalname,
+      );
+    } catch {
+      originalName = metadata.Metadata.originalname;
+    }
+  }
+
+  const safeName = String(
+    originalName || "download",
+  )
+    .replace(/[\r\n"]/g, "_")
+    .slice(0, 180);
+
+  const asciiName = safeName
+    .replace(/[^\x20-\x7E]/g, "_");
+
+  const storedContentType =
+    metadata?.ContentType ||
+    "application/octet-stream";
+
+  const contentType =
+    storedContentType === "application/octet-stream" &&
+    safeName.toLowerCase().endsWith(".pdf")
+      ? "application/pdf"
+      : storedContentType;
+
   return createPresignedUrl(
     r2,
     new GetObjectCommand({
       Bucket: bucketName,
       Key: normalizedObjectName,
+      ResponseContentType: contentType,
+      ResponseContentDisposition:
+        `attachment; filename="${asciiName}"; ` +
+        `filename*=UTF-8''${encodeURIComponent(safeName)}`,
     }),
     {
       expiresIn:
