@@ -81,6 +81,12 @@ router.get(
 );
 
 router.delete(
+  "/:submissionId",
+  requireRole("STUDENT", "ASSISTANT", "TEACHER"),
+  submissionController.deleteSubmission,
+);
+
+router.delete(
   "/:submissionId/files/:fileId",
   requireRole("STUDENT"),
   submissionController.deleteHomeworkFile,

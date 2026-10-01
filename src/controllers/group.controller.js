@@ -115,6 +115,7 @@ async function removeStudent(req, res) {
     await groupService.removeStudentFromGroup({
       groupId: req.params.groupId,
       studentId: req.params.studentId,
+      viewer: req.user,
     });
     res.json({ msg: "Student removed from group" });
   } catch (err) {

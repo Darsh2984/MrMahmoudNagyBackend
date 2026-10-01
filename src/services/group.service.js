@@ -419,9 +419,10 @@ function normalizeStudentIds({
   );
 }
 
-async function assertCanAddStudentsToGroup({
+async function assertCanManageStudentsInGroup({
   groupId,
   viewer,
+  action = "manage",
 }) {
   const isAdminLevel =
     viewer?.role === "TEACHER" ||
@@ -435,7 +436,7 @@ async function assertCanAddStudentsToGroup({
   if (viewer?.role !== "ASSISTANT") {
     throw {
       status: 403,
-      msg: "You cannot add students to this group.",
+      msg: `You cannot ${action} students in this group.`,
     };
   }
 
@@ -453,7 +454,7 @@ async function assertCanAddStudentsToGroup({
   if (!assignment) {
     throw {
       status: 403,
-      msg: "You can only add students to groups assigned to you.",
+      msg: `You can only ${action} students in groups assigned to you.`,
     };
   }
 }
@@ -495,9 +496,10 @@ async function addStudentsToGroup({
     };
   }
 
-  await assertCanAddStudentsToGroup({
+  await assertCanManageStudentsInGroup({
     groupId,
     viewer,
+    action: "add",
   });
 
   const students =
@@ -604,7 +606,31 @@ async function addStudentToGroup({
 async function removeStudentFromGroup({
   groupId,
   studentId,
+  viewer,
 }) {
+  await assertCanManageStudentsInGroup({
+    groupId,
+    viewer,
+    action: "remove",
+  });
+
+  const membership = await prisma.groupMembership.findUnique({
+    where: {
+      groupId_studentId: {
+        groupId,
+        studentId,
+      },
+    },
+    select: { id: true },
+  });
+
+  if (!membership) {
+    throw {
+      status: 404,
+      msg: "Student is not assigned to this group.",
+    };
+  }
+
   return prisma.groupMembership.delete({
     where: {
       groupId_studentId: {

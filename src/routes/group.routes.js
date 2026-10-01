@@ -14,6 +14,6 @@ router.put("/:groupId/session-links", requireAdminLevel, groupController.updateS
 router.patch("/:groupId", requireAdminLevel, groupController.updateGroup);
 router.delete("/:groupId", requireAdminLevel, groupController.deleteGroup);
 router.post("/:groupId/students", requireRole("TEACHER", "ASSISTANT"), groupController.addStudent);
-router.delete("/:groupId/students/:studentId", requireAdminLevel, groupController.removeStudent);
+router.delete("/:groupId/students/:studentId", requireRole("TEACHER", "ASSISTANT"), groupController.removeStudent);
 
 module.exports = router;

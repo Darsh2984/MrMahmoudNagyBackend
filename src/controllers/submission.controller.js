@@ -85,6 +85,26 @@ async function removeHardcopySubmission(req, res) {
   }
 }
 
+async function deleteSubmission(req, res) {
+  try {
+    const result = await submissionService.deleteSubmission({
+      submissionId: req.params.submissionId,
+      requestedBy: req.user,
+    });
+
+    return res.json({
+      msg: "Homework submission removed.",
+      ...result,
+    });
+  } catch (error) {
+    return sendError(
+      res,
+      error,
+      "Error removing homework submission.",
+    );
+  }
+}
+
 async function prepareStudentUploadsByStaff(req, res) {
   try {
     const uploads = await submissionService.prepareStudentUploadsByStaff({
@@ -408,6 +428,7 @@ async function getGradingHistory(
 module.exports = {
   markHardcopySubmission,
   removeHardcopySubmission,
+  deleteSubmission,
   prepareStudentUploadsByStaff,
   confirmStudentUploadsByStaff,
   abortStudentUploadsByStaff,

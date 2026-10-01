@@ -539,6 +539,97 @@ async function removeHardcopySubmission({ submissionId, requestedBy }) {
   };
 }
 
+async function deleteSubmission({ submissionId, requestedBy }) {
+  if (
+    !requestedBy?.id ||
+    !["STUDENT", "ASSISTANT", "TEACHER"].includes(requestedBy.role)
+  ) {
+    throw createServiceError(403, "You cannot remove this submission.");
+  }
+
+  const submission = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: {
+      files: {
+        select: { objectKey: true },
+      },
+      correctedFiles: {
+        select: { objectKey: true },
+      },
+      gradingHistory: {
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+
+  if (!submission) {
+    throw createServiceError(404, "Homework submission not found.");
+  }
+
+  if (requestedBy.role === "STUDENT") {
+    if (submission.studentId !== requestedBy.id) {
+      throw createServiceError(403, "You can only remove your own submission.");
+    }
+
+    if (submission.submissionMethod === "HARDCOPY") {
+      throw createServiceError(
+        403,
+        "A hardcopy submission can only be removed by teaching staff.",
+      );
+    }
+
+    if (
+      submission.grade !== null ||
+      submission.correctedFileUrl ||
+      submission.correctedFiles.length > 0 ||
+      submission.gradingHistory.length > 0
+    ) {
+      throw createServiceError(
+        409,
+        "This submission has already been graded and cannot be removed by the student.",
+      );
+    }
+
+  } else {
+    await assertStaffCanActForStudentTask({
+      taskId: submission.taskId,
+      studentId: submission.studentId,
+      requestedBy,
+    });
+  }
+
+  const storedObjectKeys = [
+    submission.fileUrl,
+    submission.correctedFileUrl,
+    ...submission.files.map(({ objectKey }) => objectKey),
+    ...submission.correctedFiles.map(({ objectKey }) => objectKey),
+  ].filter(Boolean);
+
+  await prisma.submission.delete({
+    where: { id: submission.id },
+  });
+
+  const uniqueObjectKeys = [...new Set(storedObjectKeys)];
+  const cleanupResults = await Promise.allSettled(
+    uniqueObjectKeys.map((objectKey) => storage.deleteFile(objectKey)),
+  );
+
+  cleanupResults.forEach((result, index) => {
+    if (result.status === "rejected") {
+      console.error(
+        `Failed to delete submission object ${uniqueObjectKeys[index]} from R2:`,
+        result.reason?.message || result.reason,
+      );
+    }
+  });
+
+  return {
+    deletedSubmissionId: submission.id,
+    studentId: submission.studentId,
+  };
+}
+
 async function prepareStudentUploadsByStaff({
   taskId,
   studentId,
@@ -2807,6 +2898,7 @@ async function deleteCorrectedFile({
 module.exports = {
   markHardcopySubmission,
   removeHardcopySubmission,
+  deleteSubmission,
   prepareStudentUploadsByStaff,
   confirmStudentUploadsByStaff,
   abortStudentUploadsByStaff,
