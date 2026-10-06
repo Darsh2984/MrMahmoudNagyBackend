@@ -90,6 +90,12 @@ enum StudentSupportChatSenderType {
   PARENT
 }
 
+enum AccountDeletionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+}
+
 // ---------------- Core: Users & Org structure ----------------
 
 model User {
@@ -215,6 +221,22 @@ model PendingStudentRegistration {
   @@index([expiresAt])
 }
 
+model AccountDeletionRequest {
+  id          String                @id @default(uuid())
+  userId      String?
+  userName    String
+  userEmail   String
+  userRole    Role
+  tokenHash   String                @unique
+  status      AccountDeletionStatus @default(PENDING)
+  requestedAt DateTime              @default(now())
+  expiresAt   DateTime
+  completedAt DateTime?
+
+  @@index([userId, status])
+  @@index([expiresAt])
+}
+
 model School {
   id        String   @id @default(uuid())
   name      String
@@ -268,13 +290,13 @@ model Year {
 }
 
 model Group {
-  id          String   @id @default(uuid())
-  name        String
-  yearId      String
-  year        Year     @relation(fields: [yearId], references: [id])
-  sessionLink String?
-  sessionLinks Json?   // [{ id, title, link }]
-  createdAt   DateTime @default(now())
+  id           String   @id @default(uuid())
+  name         String
+  yearId       String
+  year         Year     @relation(fields: [yearId], references: [id])
+  sessionLink  String?
+  sessionLinks Json? // [{ id, title, link }]
+  createdAt    DateTime @default(now())
 
   members              GroupMembership[]
   assistantAssignments AssistantGroupAssignment[]

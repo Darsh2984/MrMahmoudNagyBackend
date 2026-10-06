@@ -40,11 +40,27 @@ router.post(
   authController.resetPassword
 );
 
+router.get(
+  "/account-deletion/:token",
+  authController.getAccountDeletionRequest
+);
+
+router.post(
+  "/account-deletion/:token/confirm",
+  authController.confirmAccountDeletion
+);
+
 // Authenticated
 router.get(
   "/me",
   requireAuth,
   authController.getCurrentUser
+);
+
+router.post(
+  "/account-deletion-request",
+  requireAuth,
+  authController.requestAccountDeletion
 );
 
 // Teacher-only

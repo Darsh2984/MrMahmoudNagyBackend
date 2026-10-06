@@ -1,5 +1,6 @@
 const authService = require("../services/auth.service");
 const studentRegistrationService = require("../services/studentRegistration.service");
+const accountDeletionService = require("../services/accountDeletion.service");
 
 async function registerStudent(req, res) {
   try {
@@ -226,6 +227,62 @@ async function getCurrentUser(req, res) {
   }
 }
 
+async function requestAccountDeletion(req, res) {
+  try {
+    const result =
+      await accountDeletionService.requestAccountDeletion(
+        req.user.id,
+      );
+
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      msg:
+        err.msg ||
+        "Could not send the account deletion request.",
+    });
+  }
+}
+
+async function getAccountDeletionRequest(req, res) {
+  try {
+    const request =
+      await accountDeletionService.getAccountDeletionRequest(
+        req.params.token,
+      );
+
+    res.json(request);
+  } catch (err) {
+    res.status(err.status || 500).json({
+      msg:
+        err.msg ||
+        "Could not load the account deletion request.",
+    });
+  }
+}
+
+async function confirmAccountDeletion(req, res) {
+  try {
+    const result =
+      await accountDeletionService.confirmAccountDeletion(
+        req.params.token,
+      );
+
+    res.json(result);
+  } catch (err) {
+    console.error(
+      "[Account deletion] Confirmation failed:",
+      err?.message || err,
+    );
+
+    res.status(err.status || 500).json({
+      msg:
+        err.msg ||
+        "Could not delete the account.",
+    });
+  }
+}
+
 async function listAssistants(req, res) {
   try {
     const assistants =
@@ -316,4 +373,7 @@ module.exports = {
   forgotPassword,
   resetPassword,
   getCurrentUser,
+  requestAccountDeletion,
+  getAccountDeletionRequest,
+  confirmAccountDeletion,
 };
