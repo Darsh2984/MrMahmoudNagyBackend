@@ -1,10 +1,7 @@
 const prisma = require("../config/prisma");
 
 const { alertAssistantOfDelegation } = require("./staffAlert.service");
-const {
-  evaluateAssistantAssignments,
-} = require("./autoDelegationPolicy.service");
-
+const crypto = require("node:crypto");
 const MAX_BULK_SUBMISSIONS = 100;
 const BULK_DELEGATION_CONCURRENCY = 5;
 const AUTO_DELEGATION_CONCURRENCY = 5;
@@ -24,6 +21,116 @@ function createServiceError(
   }
 
   return error;
+}
+const autoDelegationQueues = new Map();
+
+function runInAutoDelegationQueue(key, operation) {
+  const previous =
+    autoDelegationQueues.get(key) ||
+    Promise.resolve();
+
+  const current = previous
+    .catch(() => {})
+    .then(operation);
+
+  autoDelegationQueues.set(key, current);
+
+  return current.finally(() => {
+    if (autoDelegationQueues.get(key) === current) {
+      autoDelegationQueues.delete(key);
+    }
+  });
+}
+
+function getEligibleAssignedAssistants(assignments) {
+  return (Array.isArray(assignments) ? assignments : [])
+    .map(({ assistant }) => assistant)
+    .filter(
+      (assistant) =>
+        assistant?.role === "ASSISTANT" &&
+        (
+          assistant.isHeadAssistant === true ||
+          assistant.permissions?.canGradeHomework === true
+        ),
+    );
+}
+
+function chooseRandomAssistant(assistants) {
+  if (!assistants.length) {
+    return null;
+  }
+
+  return assistants[
+    crypto.randomInt(assistants.length)
+  ];
+}
+
+async function chooseLeastLoadedAssistant({
+  assistants,
+  taskId,
+}) {
+  if (!assistants.length) {
+    return null;
+  }
+
+  if (assistants.length === 1) {
+    return assistants[0];
+  }
+
+  const assistantIds = assistants.map(
+    ({ id }) => id,
+  );
+
+  /*
+   * Count every current delegation for this task.
+   *
+   * Completed delegations are deliberately included so that
+   * finishing work early does not cause the same assistant
+   * to receive an unfair number of submissions.
+   */
+  const delegationCounts =
+    await prisma.delegation.groupBy({
+      by: ["assistantId"],
+
+      where: {
+        assistantId: {
+          in: assistantIds,
+        },
+
+        submission: {
+          taskId,
+        },
+      },
+
+      _count: {
+        _all: true,
+      },
+    });
+
+  const countByAssistantId = new Map(
+    delegationCounts.map((row) => [
+      row.assistantId,
+      row._count._all,
+    ]),
+  );
+
+  const minimumCount = Math.min(
+    ...assistants.map(
+      ({ id }) =>
+        countByAssistantId.get(id) || 0,
+    ),
+  );
+
+  const leastLoadedAssistants =
+    assistants.filter(
+      ({ id }) =>
+        (countByAssistantId.get(id) || 0) ===
+        minimumCount,
+    );
+
+  return chooseRandomAssistant(
+    leastLoadedAssistants,
+  );
 }
 
 function normalizeReason(reason) {
@@ -401,16 +508,35 @@ async function delegateSubmission({
  * has exactly one assigned assistant who can grade it. Every ambiguous case
  * remains undelegated.
  */
+/**
+ * Automatically delegates Homework and In-Class Quiz submissions.
+ *
+ * Delegation is balanced separately for every task:
+ *
+ * 1. Find the student's relevant task group.
+ * 2. Find every eligible assistant assigned to that group.
+ * 3. Count each assistant's delegations for this task.
+ * 4. Select randomly among assistants having the lowest count.
+ *
+ * Hardcopy submissions remain assigned to the eligible assistant
+ * who recorded the hardcopy submission.
+ */
 async function autoDelegateSubmission({
   submissionId,
   skipNotification = false,
 }) {
-  const submission = await getSubmissionForDelegation(submissionId);
+  const initialSubmission =
+    await getSubmissionForDelegation(
+      submissionId,
+    );
 
-  if (submission.grade !== null || submission.delegation) {
+  if (
+    initialSubmission.grade !== null ||
+    initialSubmission.delegation
+  ) {
     return {
       delegated: false,
-      reason: submission.delegation
+      reason: initialSubmission.delegation
         ? "ALREADY_DELEGATED"
         : "ALREADY_GRADED",
     };
@@ -418,9 +544,10 @@ async function autoDelegateSubmission({
 
   if (
     !["HOMEWORK", "IN_CLASS_QUIZ"].includes(
-      submission.task.taskType,
+      initialSubmission.task.taskType,
     ) &&
-    submission.submissionMethod !== "HARDCOPY"
+    initialSubmission.submissionMethod !==
+      "HARDCOPY"
   ) {
     return {
       delegated: false,
@@ -428,25 +555,39 @@ async function autoDelegateSubmission({
     };
   }
 
-  const taskGroupIds = submission.task.groups.map(
-    ({ groupId }) => groupId,
-  );
+  const taskGroupIds =
+    initialSubmission.task.groups.map(
+      ({ groupId }) => groupId,
+    );
 
-  const memberships = await prisma.groupMembership.findMany({
-    where: {
-      studentId: submission.studentId,
-      groupId: { in: taskGroupIds },
-    },
-    select: { groupId: true },
-  });
+  const memberships =
+    await prisma.groupMembership.findMany({
+      where: {
+        studentId:
+          initialSubmission.studentId,
+
+        groupId: {
+          in: taskGroupIds,
+        },
+      },
+
+      select: {
+        groupId: true,
+      },
+    });
 
   const relevantGroupIds = [
-    ...new Set(memberships.map(({ groupId }) => String(groupId))),
+    ...new Set(
+      memberships.map(({ groupId }) =>
+        String(groupId),
+      ),
+    ),
   ];
 
   if (relevantGroupIds.length !== 1) {
     return {
       delegated: false,
+
       reason:
         relevantGroupIds.length === 0
           ? "NO_RELEVANT_GROUP"
@@ -455,85 +596,164 @@ async function autoDelegateSubmission({
   }
 
   const groupId = relevantGroupIds[0];
-  const assignments = await prisma.assistantGroupAssignment.findMany({
-    where: { groupId },
-    select: {
-      assistant: {
-        select: {
-          id: true,
-          role: true,
-          isHeadAssistant: true,
-          permissions: true,
-        },
-      },
+
+  /*
+   * Serializes automatic delegation for submissions belonging
+   * to the same task and group. This prevents several uploads
+   * arriving together from all selecting the same assistant
+   * before their delegation counts are updated.
+   */
+  return runInAutoDelegationQueue(
+    `${initialSubmission.taskId}:${groupId}`,
+
+    async () => {
+      /*
+       * Check again after waiting in the queue. Another process
+       * may already have delegated or graded this submission.
+       */
+      const submission =
+        await getSubmissionForDelegation(
+          submissionId,
+        );
+
+      if (
+        submission.grade !== null ||
+        submission.delegation
+      ) {
+        return {
+          delegated: false,
+
+          reason: submission.delegation
+            ? "ALREADY_DELEGATED"
+            : "ALREADY_GRADED",
+        };
+      }
+
+      const assignments =
+        await prisma
+          .assistantGroupAssignment
+          .findMany({
+            where: {
+              groupId,
+            },
+
+            select: {
+              assistant: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                  role: true,
+                  isHeadAssistant: true,
+                  permissions: true,
+                },
+              },
+            },
+          });
+
+      const eligibleAssistants =
+        getEligibleAssignedAssistants(
+          assignments,
+        );
+
+      if (eligibleAssistants.length === 0) {
+        return {
+          delegated: false,
+
+          reason:
+            assignments.length === 0
+              ? "NO_ASSISTANT"
+              : "NO_ELIGIBLE_ASSISTANT",
+
+          groupId,
+        };
+      }
+
+      /*
+       * Preserve the existing hardcopy behavior: when an eligible
+       * assistant records a hardcopy, delegate it to that assistant.
+       */
+      const hardcopyMarker =
+        submission.submissionMethod ===
+          "HARDCOPY" &&
+        submission.hardcopyMarkedById
+          ? eligibleAssistants.find(
+              ({ id }) =>
+                id ===
+                submission.hardcopyMarkedById,
+            ) || null
+          : null;
+
+      const assistant =
+        hardcopyMarker ||
+        (await chooseLeastLoadedAssistant({
+          assistants: eligibleAssistants,
+          taskId: submission.taskId,
+        }));
+
+      if (!assistant) {
+        return {
+          delegated: false,
+          reason: "NO_ELIGIBLE_ASSISTANT",
+          groupId,
+        };
+      }
+
+      const delegation =
+        await delegateSubmission({
+          submissionId,
+          assistantId: assistant.id,
+          delegatedById:
+            submission.task.teacherId,
+          groupId,
+
+          reason: hardcopyMarker
+            ? "Automatically delegated to the assistant who recorded the hardcopy submission."
+            : "Automatically delegated using balanced per-task assignment among eligible assistants for this group.",
+
+          skipNotification: true,
+        });
+
+      if (!skipNotification) {
+        const taskTypeLabel =
+          getTaskTypeLabel(
+            submission.task,
+          );
+
+        notifyAssistantOfDelegation({
+          assistant:
+            delegation.assistant,
+
+          submission,
+
+          title:
+            `${getTaskTypeLabel(
+              submission.task,
+              {
+                capitalize: true,
+              },
+            )} automatically assigned for grading`,
+
+          body: hardcopyMarker
+            ? `${submission.student?.name || "A student"}'s hardcopy for ${submission.task?.title || taskTypeLabel} was assigned to you for grading.`
+            : `${submission.student?.name || "A student"} submitted ${submission.task?.title || taskTypeLabel}. It was automatically assigned to you using balanced delegation for this task.`,
+        }).catch((error) => {
+          console.error(
+            "Automatic delegation notification failed:",
+            error.message,
+          );
+        });
+      }
+
+      return {
+        delegated: true,
+        delegation,
+        groupId,
+        assistantId: assistant.id,
+        submission,
+      };
     },
-  });
-
-  const hardcopyMarker =
-    submission.submissionMethod === "HARDCOPY" &&
-    submission.hardcopyMarkedById
-      ? assignments
-          .map(({ assistant }) => assistant)
-          .find(
-            (assistant) =>
-              assistant?.id === submission.hardcopyMarkedById &&
-              assistant.role === "ASSISTANT" &&
-              (assistant.isHeadAssistant === true ||
-                assistant.permissions?.canGradeHomework === true),
-          )
-      : null;
-
-  const assignmentDecision = hardcopyMarker
-    ? { assistant: hardcopyMarker, reason: null }
-    : evaluateAssistantAssignments(assignments);
-
-  if (!assignmentDecision.assistant) {
-    return {
-      delegated: false,
-      reason: assignmentDecision.reason,
-      groupId,
-    };
-  }
-
-  const assistant = assignmentDecision.assistant;
-  const delegation = await delegateSubmission({
-    submissionId,
-    assistantId: assistant.id,
-    delegatedById: submission.task.teacherId,
-    groupId,
-    reason: hardcopyMarker
-      ? "Automatically delegated to the assistant who recorded the hardcopy submission."
-      : "Automatically delegated because this group has one eligible assistant.",
-    skipNotification: true,
-  });
-
-  if (!skipNotification) {
-    const taskTypeLabel = getTaskTypeLabel(submission.task);
-
-    notifyAssistantOfDelegation({
-      assistant: delegation.assistant,
-      submission,
-      title: `${getTaskTypeLabel(submission.task, {
-        capitalize: true,
-      })} automatically assigned for grading`,
-      body: hardcopyMarker
-        ? `${submission.student?.name || "A student"}'s hardcopy for ${submission.task?.title || taskTypeLabel} was assigned to you for grading.`
-        : `${submission.student?.name || "A student"} submitted ${submission.task?.title || taskTypeLabel}. It was automatically assigned to you because you are the only eligible assistant for this group.`,
-    }).catch((error) => {
-      console.error(
-        "Automatic delegation notification failed:",
-        error.message,
-      );
-    });
-  }
-
-  return {
-    delegated: true,
-    delegation,
-    groupId,
-    assistantId: assistant.id,
-    submission,
-  };
+  );
 }
 
 /**
