@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const ExcelJS = require("exceljs");
+const { PDFDocument } = require("pdf-lib");
 const { buildSessionReport } = require("../src/services/sessionReport.service");
 
 const student = (id, name) => ({ id, name, email: `${id}@example.test` });
@@ -22,25 +22,25 @@ const session = {
   ] }],
 };
 
-test("workbook preserves roster, zero grades, pending and missing answers", async () => {
-  const book = new ExcelJS.Workbook();
-  await book.xlsx.load(await buildSessionReport(session));
-  const attendance = book.getWorksheet("Attendance");
-  assert.equal(attendance.getCell("D7").value, "Present");
-  assert.equal(attendance.getCell("D8").value, "Absent");
-  assert.equal(attendance.getCell("D9").value, "Not recorded");
-  const results = book.getWorksheet("Live question results");
-  assert.equal(results.getCell("F7").value, 0);
-  assert.equal(results.getCell("E8").value, "No answer");
-  assert.equal(results.getCell("E9").value, "Awaiting grading");
-  assert.equal(results.getCell("F9").value, null);
+test("generates a PDF with attendance and question pages", async () => {
+  const bytes = await buildSessionReport(session);
+  assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
+  const pdf = await PDFDocument.load(bytes);
+  assert.equal(pdf.getPageCount(), 2);
+  assert.equal(pdf.getTitle(), "Physics - Attendance and Grades");
 });
 
-test("empty sessions produce valid sheets", async () => {
-  const book = new ExcelJS.Workbook();
-  await book.xlsx.load(await buildSessionReport({ ...session, attendance: [], liveQuestions: [] }));
-  assert.equal(book.worksheets.length, 2);
-  assert.equal(book.getWorksheet("Attendance").rowCount, 6);
+test("empty sessions still export a valid PDF", async () => {
+  const pdf = await PDFDocument.load(await buildSessionReport({ ...session, attendance: [], liveQuestions: [] }));
+  assert.equal(pdf.getPageCount(), 1);
+});
+
+test("large rosters and long names paginate", async () => {
+  const attendance = Array.from({length: 100}, (_, i) => ({
+    studentId: String(i), student: student(String(i), "Student " + i + " long name ".repeat(5)), status: "PRESENT",
+  }));
+  const pdf = await PDFDocument.load(await buildSessionReport({ ...session, attendance, liveQuestions: [] }));
+  assert.ok(pdf.getPageCount() > 3);
 });
 
 test("report enforces staff roles and assistant group assignment", async () => {

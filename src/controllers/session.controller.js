@@ -120,8 +120,8 @@ async function markAttendance(req, res) {
 async function exportSessionReport(req, res) {
   try {
     const buffer = await sessionService.exportSessionReport(req.params.sessionId, req.user);
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", 'attachment; filename="session-report.xlsx"');
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'attachment; filename="session-report.pdf"');
     res.setHeader("Cache-Control", "private, no-store");
     res.send(buffer);
   } catch (error) {

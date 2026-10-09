@@ -1,86 +1,119 @@
-const ExcelJS = require("exceljs");
+const fs = require("node:fs");
+const { PDFDocument, rgb } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit");
 
 async function buildSessionReport(session) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Mahmoud Nagy's Team";
-  workbook.created = new Date();
-  const date = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Africa/Cairo", dateStyle: "medium",
-  }).format(session.date);
-  const students = new Map();
-  const attendance = new Map();
-  for (const record of session.attendance) {
-    students.set(record.studentId, record.student);
-    attendance.set(record.studentId, record.status);
+  const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
+  pdf.setTitle(session.title + " - Attendance and Grades");
+  pdf.setAuthor("Mahmoud Nagy's Team");
+  const font = await pdf.embedFont(fs.readFileSync(require.resolve("@expo-google-fonts/cairo/400Regular/Cairo_400Regular.ttf")), { subset: true });
+  const bold = await pdf.embedFont(fs.readFileSync(require.resolve("@expo-google-fonts/cairo/700Bold/Cairo_700Bold.ttf")), { subset: true });
+  const navy = rgb(.07, .24, .28), pale = rgb(.94, .97, .96);
+  const width = 595.28, height = 841.89, margin = 38, usable = width - margin * 2;
+  let page, y;
+  function nextPage(section) {
+    page = pdf.addPage([width, height]);
+    page.drawRectangle({ x: 0, y: height - 12, width, height: 12, color: navy });
+    page.drawText("MAHMOUD NAGY'S TEAM", { x: margin, y: height - 44, font: bold, size: 13, color: navy });
+    page.drawText(section, { x: margin, y: height - 66, font, size: 10, color: navy });
+    y = height - 95;
   }
-  for (const question of session.liveQuestions) {
-    for (const answer of question.answers) students.set(answer.studentId, answer.student);
-  }
-  const roster = [...students.values()].sort((a, b) =>
-    (a.name || "").localeCompare(b.name || "") || a.id.localeCompare(b.id));
-
-  function sheet(name, headings, widths, note) {
-    const result = workbook.addWorksheet(name);
-    result.columns = widths.map(width => ({ width }));
-    const metadata = [
-      `Mahmoud Nagy's Team - ${name}`, `Session: ${session.title}`,
-      `Academic year: ${session.group.year.name}`,
-      `Group: ${session.group.name} | ${date} (Egypt)`, note,
-    ];
-    metadata.forEach((value, index) => {
-      result.mergeCells(index + 1, 1, index + 1, headings.length);
-      result.getCell(index + 1, 1).value = value;
-      result.getRow(index + 1).height = 30;
-      result.getCell(index + 1, 1).alignment = { wrapText: true, vertical: "middle" };
-    });
-    result.getRow(6).values = headings;
-    for (const rowNumber of [1, 6]) {
-      result.getRow(rowNumber).height = 32;
-      result.getRow(rowNumber).eachCell(cell => {
-        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF123E48" } };
-      });
+  function wrap(value, maxWidth, size = 10, face = font) {
+    const output = [];
+    let line = "";
+    for (const word of String(value ?? "-").replace(/\s+/g, " ").split(" ")) {
+      const candidate = line ? line + " " + word : word;
+      if (face.widthOfTextAtSize(candidate, size) <= maxWidth) { line = candidate; continue; }
+      if (line) output.push(line);
+      line = "";
+      for (const char of word) {
+        if (line && face.widthOfTextAtSize(line + char, size) > maxWidth) { output.push(line); line = ""; }
+        line += char;
+      }
     }
-    result.views = [{ state: "frozen", ySplit: 6 }];
-    result.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true,
-      fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:6" };
-    result.headerFooter.oddFooter = "Page &P of &N";
-    return result;
+    output.push(line);
+    return output;
   }
-  const present = [...attendance.values()].filter(value => value === "PRESENT").length;
-  const absent = [...attendance.values()].filter(value => value === "ABSENT").length;
-  const attendanceSheet = sheet("Attendance",
-    ["#", "Student", "Email", "Attendance"], [8, 34, 44, 24],
-    `Present: ${present} | Absent: ${absent} | Not recorded: ${roster.length - attendance.size}. Saved session roster.`);
-  roster.forEach((student, index) => attendanceSheet.addRow([
-    index + 1, student.name || "", student.email || "",
-    attendance.get(student.id) === "PRESENT" ? "Present" :
-      attendance.get(student.id) === "ABSENT" ? "Absent" : "Not recorded",
-  ]));
-  const results = sheet("Live question results",
-    ["Student", "Email", "Question", "Question text", "Answer status", "Grade", "Out of", "Selected option"],
-    [32, 40, 14, 65, 24, 12, 12, 18],
-    session.liveQuestions.length ? "Blank grades indicate no answer or pending grading. Zero is a recorded grade." : "No live questions in this session.");
+  function text(value, section, face = font, size = 10) {
+    for (const line of wrap(value, usable, size, face)) {
+      if (y < 65) nextPage(section);
+      page.drawText(line, { x: margin, y, font: face, size, color: navy });
+      y -= size + 8;
+    }
+    y -= 5;
+  }
+  function table(headings, widths, rows, section) {
+    function header() {
+      page.drawRectangle({ x: margin, y: y - 23, width: usable, height: 27, color: navy });
+      let x = margin;
+      headings.forEach((label, i) => {
+        page.drawText(label, { x: x + 7, y: y - 14, font: bold, size: 9, color: rgb(1, 1, 1) });
+        x += widths[i];
+      });
+      y -= 27;
+    }
+    if (y < 110) nextPage(section);
+    header();
+    rows.forEach((row, index) => {
+      const cells = row.map((value, i) => wrap(value, widths[i] - 14, 9));
+      const count = Math.max(...cells.map(cell => cell.length));
+      let offset = 0;
+      while (offset < count) {
+        if (y < 90) { nextPage(section); header(); }
+        const chunk = Math.min(count - offset, Math.max(1, Math.floor((y - 72) / 16)));
+        const rowHeight = chunk * 16 + 12;
+        if (index % 2 === 0) page.drawRectangle({ x: margin, y: y - rowHeight, width: usable, height: rowHeight, color: pale });
+        let x = margin;
+        cells.forEach((cell, i) => {
+          cell.slice(offset, offset + chunk).forEach((line, j) => {
+            const rtl = /^[\u0600-\u06ff]/.test(line);
+            page.drawText(line, { x: rtl ? x + widths[i] - 7 - font.widthOfTextAtSize(line, 9) : x + 7,
+              y: y - 17 - j * 16, size: 9, font, color: navy });
+          });
+          x += widths[i];
+        });
+        y -= rowHeight;
+        offset += chunk;
+      }
+    });
+    y -= 16;
+  }
+  const students = new Map(), attendance = new Map();
+  for (const record of session.attendance) { students.set(record.studentId, record.student); attendance.set(record.studentId, record.status); }
+  for (const question of session.liveQuestions) for (const answer of question.answers) students.set(answer.studentId, answer.student);
+  const roster = [...students.values()].sort((a, b) => (a.name || "").localeCompare(b.name || "") || a.id.localeCompare(b.id));
+  nextPage("SESSION ATTENDANCE REPORT");
+  text(session.title, "Attendance", bold, 17);
+  text(session.group.year.name + " / " + session.group.name, "Attendance");
+  text(new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", dateStyle: "medium" }).format(session.date) + " (Egypt)", "Attendance");
+  const present = [...attendance.values()].filter(s => s === "PRESENT").length;
+  const absent = [...attendance.values()].filter(s => s === "ABSENT").length;
+  text("Present: " + present + " | Absent: " + absent + " | Not recorded: " + (roster.length - attendance.size), "Attendance", bold);
+  text("Based on saved attendance records for this session.", "Attendance");
+  if (!roster.length) text("No student records for this session.", "Attendance");
+  else table(["Student", "Email", "Attendance"], [180, 230, usable - 410], roster.map(student => [student.name || "-", student.email || "-",
+    attendance.get(student.id) === "PRESENT" ? "Present" : attendance.get(student.id) === "ABSENT" ? "Absent" : "Not recorded"]), "Attendance (continued)");
+  if (!session.liveQuestions.length) text("No live questions in this session.", "Attendance");
   session.liveQuestions.forEach((question, index) => {
+    const section = "LIVE QUESTION " + (index + 1) + " - RESULTS";
+    nextPage(section);
+    text(session.title, section, bold, 14);
+    text(question.prompt || "Image question", section);
+    text("Maximum grade: " + question.gradeOutOf, section, bold);
     const answers = new Map(question.answers.map(answer => [answer.studentId, answer]));
-    for (const student of roster) {
+    if (!roster.length) text("No student answers recorded.", section);
+    else table(["Student", "Answer status", "Grade", "Option"], [210, 150, 85, usable - 445], roster.map(student => {
       const answer = answers.get(student.id);
       const graded = answer?.status === "GRADED" && answer.grade != null;
-      results.addRow([student.name || "", student.email || "", `Q${index + 1}`,
-        question.prompt || "", !answer ? "No answer" : graded ? "Graded" : "Awaiting grading",
-        graded ? answer.grade : null, question.gradeOutOf, answer?.selectedOption || ""]);
-    }
+      return [student.name || "-", !answer ? "No answer" : graded ? "Graded" : "Awaiting grading",
+        graded ? answer.grade + " / " + question.gradeOutOf : "-", answer?.selectedOption || "-"];
+    }), section);
   });
-  for (const page of workbook.worksheets) {
-    page.autoFilter = { from: { row: 6, column: 1 }, to: { row: Math.max(6, page.rowCount), column: page.columnCount } };
-    for (let row = 7; row <= page.rowCount; row++) {
-      page.getRow(row).alignment = { vertical: "top", wrapText: true };
-      if (row % 2) page.getRow(row).eachCell(cell => {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF0F5F3" } };
-      });
-    }
-  }
-  return Buffer.from(await workbook.xlsx.writeBuffer());
+  pdf.getPages().forEach((item, index) => {
+    item.drawText("Session report - teaching staff", { x: margin, y: 27, size: 8, font, color: navy });
+    item.drawText((index + 1) + " / " + pdf.getPageCount(), { x: width - 80, y: 27, size: 8, font, color: navy });
+  });
+  return Buffer.from(await pdf.save());
 }
-
 module.exports = { buildSessionReport };
