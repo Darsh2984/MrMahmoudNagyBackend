@@ -751,7 +751,34 @@ async function markAttendance(
   );
 }
 
+async function exportSessionReport(sessionId, user) {
+  if (!["TEACHER", "ASSISTANT"].includes(user?.role)) {
+    throw createHttpError(403, "Only teaching staff can export reports.");
+  }
+  const existing = await prisma.session.findUnique({
+    where: { id: sessionId }, select: { groupId: true },
+  });
+  if (!existing) throw createHttpError(404, "Session not found.");
+  await assertGroupAccess(existing.groupId, user);
+  const student = { select: { id: true, name: true, email: true } };
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    include: {
+      group: { include: { year: true } },
+      attendance: { include: { student } },
+      liveQuestions: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        include: { answers: { include: { student } } },
+      },
+    },
+  });
+  if (!session) throw createHttpError(404, "Session not found.");
+  await assertGroupAccess(session.groupId, user);
+  return require("./sessionReport.service").buildSessionReport(session);
+}
+
 module.exports = {
+  exportSessionReport,
   createSession,
   listSessionsByGroup,
   getSessionWithDetails,

@@ -43,4 +43,6 @@ router.post(
   sessionController.markAttendance
 );
 
+router.get("/:sessionId/report", requireAuth, sessionController.exportSessionReport);
+
 module.exports = router;
