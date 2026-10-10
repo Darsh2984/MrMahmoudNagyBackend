@@ -456,7 +456,9 @@ async function getSessionWithDetails(
       session.liveQuestions.map(
         (question) => ({
           ...question,
-          correctAnswer: null,
+          correctAnswer: question.type === "MCQ" &&
+            question.answers.some(answer => answer.studentId === user.id)
+            ? question.correctAnswer : null,
 
           answers:
             question.answers.filter(
@@ -548,6 +550,7 @@ async function deleteSession(
         liveQuestions: {
           select: {
             id: true,
+            aiPacks: { select: { questionKey: true, schemeKey: true } },
           },
         },
       },
@@ -565,6 +568,9 @@ async function deleteSession(
       (question) =>
         question.id
     );
+
+  const referenceKeys = session.liveQuestions.flatMap(question =>
+    (question.aiPacks || []).flatMap(pack => [pack.questionKey, pack.schemeKey]));
 
   await prisma.$transaction(
     async (tx) => {
@@ -603,6 +609,10 @@ async function deleteSession(
       });
     }
   );
+  const cleanup = await Promise.allSettled(referenceKeys.map(key => storage.deleteFile(key)));
+  cleanup.forEach(result => {
+    if (result.status === "rejected") console.error("Live AI reference cleanup failed:", result.reason?.message);
+  });
 }
 
 /**

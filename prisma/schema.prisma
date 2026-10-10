@@ -845,6 +845,7 @@ model SessionAttendance {
 // Requirement #3: teacher poses a question worth X marks during a session;
 // student photographs their handwritten answer and uploads it; assistant grades it.
 model LiveQuestion {
+  aiPacks LiveQuestionAIPack[]
   id               String    @id @default(uuid())
   sessionId        String
   session          Session   @relation(fields: [sessionId], references: [id])
@@ -865,6 +866,7 @@ model LiveQuestion {
 }
 
 model LiveQuestionAnswer {
+  aiCorrections LiveAnswerAICorrection[]
   id             String        @id @default(uuid())
   liveQuestionId String
   liveQuestion   LiveQuestion  @relation(fields: [liveQuestionId], references: [id])
@@ -883,6 +885,39 @@ model LiveQuestionAnswer {
 }
 
 // ---------------- Homework / Tasks / Delegation ----------------
+model LiveQuestionAIPack {
+  id String @id @default(uuid())
+  questionId String
+  question LiveQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionKey String
+  schemeKey String
+  questionName String
+  schemeName String
+  status String @default("PROCESSING")
+  rubric Json?
+  error String?
+  approved Boolean @default(false)
+  createdAt DateTime @default(now())
+  corrections LiveAnswerAICorrection[]
+  @@index([questionId, createdAt])
+}
+
+model LiveAnswerAICorrection {
+  id String @id @default(uuid())
+  answerId String
+  answer LiveQuestionAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+  packId String
+  pack LiveQuestionAIPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  status String @default("PROCESSING")
+  result Json?
+  reviewedResult Json?
+  confirmedAt DateTime?
+  confirmedByName String?
+  error String?
+  updatedAt DateTime @updatedAt
+  @@unique([answerId, packId])
+}
+
 
 enum TaskType {
   HOMEWORK

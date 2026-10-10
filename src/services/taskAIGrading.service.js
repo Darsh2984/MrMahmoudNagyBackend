@@ -511,6 +511,9 @@ async function confirmedCorrectionForExport(submissionId, correctionId, user) {
 }
 
 module.exports = {
+  geminiClient,
+  uploadGeminiFile,
+  responseJson,
   assertTaskAccess,
   getTaskPack,
   uploadTaskPack,

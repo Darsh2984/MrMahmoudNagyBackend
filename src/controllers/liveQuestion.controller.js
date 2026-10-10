@@ -33,6 +33,7 @@ async function submitAnswer(req, res) {
       studentId: req.user.id,
       file: req.file,
       selectedOption: req.body.selectedOption,
+      requestStartedAt: req.answerRequestStartedAt,
     });
     res.json({ msg: "Answer submitted", answer });
   } catch (err) {

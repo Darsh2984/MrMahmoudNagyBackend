@@ -262,6 +262,7 @@ async function submitAnswer({
   studentId,
   file,
   selectedOption,
+  requestStartedAt,
 }) {
 
   const question =
@@ -324,16 +325,6 @@ async function submitAnswer({
     );
   }
 
-  if (
-    question.closesAt &&
-    new Date() >= question.closesAt
-  ) {
-    throw createHttpError(
-      400,
-      "The timer for this live question has expired"
-    );
-  }
-
   const existing =
     await prisma.liveQuestionAnswer.findUnique({
       where: {
@@ -348,10 +339,14 @@ async function submitAnswer({
     });
 
   if (existing) {
-    throw createHttpError(
-      400,
-      "You've already submitted an answer for this question"
-    );
+    return mapLiveQuestionAnswer(await prisma.liveQuestionAnswer.findUnique({
+      where: { id: existing.id },
+    }));
+  }
+
+  const receivedAt = requestStartedAt instanceof Date ? requestStartedAt : new Date();
+  if (question.closesAt && (receivedAt >= question.closesAt || Date.now() - receivedAt.getTime() > 5 * 60 * 1000)) {
+    throw createHttpError(400, "The timer expired before your upload started. Uploads started before the deadline have up to 5 minutes to finish.");
   }
 
   /*
@@ -373,8 +368,9 @@ async function submitAnswer({
     isMcq &&
     normalizedSelectedOption === question.correctAnswer;
 
-  const createdAnswer =
-    await prisma.liveQuestionAnswer.create({
+  let createdAnswer;
+  try {
+    createdAnswer = await prisma.liveQuestionAnswer.create({
       data: {
         liveQuestionId,
         studentId,
@@ -405,6 +401,18 @@ async function submitAnswer({
         },
       },
     });
+
+  } catch (error) {
+    if (answerImageUrl) await storage.deleteFile(answerImageUrl).catch(cleanupError =>
+      console.error("Unused live answer cleanup failed:", cleanupError.message));
+    if (error.code === "P2002") {
+      const saved = await prisma.liveQuestionAnswer.findUnique({
+        where: { liveQuestionId_studentId: { liveQuestionId, studentId } },
+      });
+      if (saved) return mapLiveQuestionAnswer(saved);
+    }
+    throw error;
+  }
 
   /*
    * Return a signed URL immediately as well.
