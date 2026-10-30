@@ -88,7 +88,7 @@ async function loadGroupReports(group, students, period) {
         id: true, title: true, deadline: true, gradeOutOf: true, taskType: true,
         submissions: {
           where: { studentId: { in: studentIds } },
-          select: { studentId: true, grade: true, submittedAt: true },
+          select: { studentId: true, grade: true, submittedAt: true, firstSubmittedAt: true },
         },
       },
     }),
@@ -101,6 +101,10 @@ async function loadGroupReports(group, students, period) {
         title: task.title,
         date: task.deadline,
         submitted: Boolean(submission),
+        late: Boolean(submission && task.deadline &&
+          (submission.firstSubmittedAt || submission.submittedAt) &&
+          new Date(submission.firstSubmittedAt || submission.submittedAt).getTime() >
+          new Date(task.deadline).getTime()),
         grade: submission?.grade ?? null,
         gradeOutOf: task.gradeOutOf,
         taskType: task.taskType || "HOMEWORK",
@@ -234,15 +238,20 @@ async function createStudentReportPdf(report) {
     }
 
     rows.forEach((row, index) => {
-      ensure(39);
-      const rowY = y - 34;
-      if (index % 2 === 0) {
-        page.drawRectangle({ x: MARGIN, y: rowY, width: PAGE_WIDTH - 2 * MARGIN, height: 38, color: PALE });
+      const rowHeight = row.late ? 56 : 38;
+      ensure(rowHeight + 1);
+      const rowY = y - rowHeight + 4;
+      const textY = y - 14;
+      if (row.late || index % 2 === 0) {
+        page.drawRectangle({ x: MARGIN, y: rowY, width: PAGE_WIDTH - 2 * MARGIN, height: rowHeight, color: row.late ? rgb(1, 0.94, 0.91) : PALE });
       }
-      drawText(page, row.title, MARGIN + 10, rowY + 20, 9.5, regular, INK, 275);
-      drawText(page, cairoDate(row.date), MARGIN + 290, rowY + 20, 8, regular, MUTED, 92);
-      drawText(page, row.result, MARGIN + 390, rowY + 20, 9, bold, row.positive ? TEAL : MUTED, 115);
-      y -= 38;
+      drawText(page, row.title, MARGIN + 10, textY, 9.5, regular, INK, 275);
+      drawText(page, cairoDate(row.date), MARGIN + 290, textY, 8, regular, MUTED, 92);
+      drawText(page, row.result, MARGIN + 390, textY, 9, bold, row.positive ? TEAL : MUTED, 115);
+      if (row.late) {
+        drawText(page, "Submitted after the DEADLINE", MARGIN + 10, textY - 21, 10, bold, rgb(0.7, 0.12, 0.08), PAGE_WIDTH - 2 * MARGIN - 20);
+      }
+      y -= rowHeight;
     });
     y -= 20;
   }

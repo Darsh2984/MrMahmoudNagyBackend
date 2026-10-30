@@ -61,8 +61,8 @@ test("one student produces a PDF and multiple students produce separate PDFs in 
       title: `Session ${index + 1} - Algebra and revision`, date,
       status: index % 3 === 0 ? "ABSENT" : "PRESENT",
     })),
-    homework: [{ title: "Homework one", date, submitted: true, grade: 8, gradeOutOf: 10 }],
-    inClassQuizzes: [{ title: "Class practice", date, submitted: true, grade: 7, gradeOutOf: 10 }],
+    homework: [{ title: "Homework one", date, submitted: true, late: true, grade: 8, gradeOutOf: 10 }],
+    inClassQuizzes: [{ title: "Class practice", date, submitted: true, late: true, grade: 7, gradeOutOf: 10 }],
   });
   const first = makeReport("student-1", "أحمد عبدالله Ahmed");
   const second = makeReport("student-2", "Mariam");
@@ -81,5 +81,31 @@ test("one student produces a PDF and multiple students produce separate PDFs in 
 
   if (process.env.REPORT_QA_OUTPUT) {
     fs.writeFileSync(process.env.REPORT_QA_OUTPUT, single.body);
+  }
+});
+
+test("late status uses first submission and current deadline, with legacy fallback", async () => {
+  const originalTask = prisma.task.findMany;
+  const originalSession = prisma.session.findMany;
+  const deadline = new Date("2026-10-30T12:00:00Z");
+  const before = new Date("2026-10-30T11:00:00Z");
+  const after = new Date("2026-10-30T13:00:00Z");
+  try {
+    prisma.session.findMany = async () => [];
+    prisma.task.findMany = async () => [
+      { firstSubmittedAt: before, submittedAt: after },
+      { firstSubmittedAt: after, submittedAt: after },
+      { firstSubmittedAt: deadline, submittedAt: deadline },
+      { firstSubmittedAt: null, submittedAt: after },
+      null,
+    ].map((submission, i) => ({ title: `Task ${i}`, deadline, gradeOutOf: 10,
+      submissions: submission ? [{ studentId: "s", ...submission }] : [] }));
+    const [report] = await service.loadGroupReports(
+      { id: "g", name: "Group", year: { name: "Year" } },
+      [{ id: "s", name: "Student" }], service.parsePeriod("2026-10-01", "2026-10-31"));
+    assert.deepEqual(report.homework.map(x => x.late), [false, true, false, true, false]);
+  } finally {
+    prisma.task.findMany = originalTask;
+    prisma.session.findMany = originalSession;
   }
 });
